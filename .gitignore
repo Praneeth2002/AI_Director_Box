@@ -1,0 +1,34 @@
+# Global
+node_modules/
+.DS_Store
+*.pem
+*.log
+
+# Environment variables
+.env*
+credentials.json
+
+# Backend
+backend/dist/
+backend/credentials.json
+backend/.env
+
+# Frontend (Next.js)
+frontend/.pnp
+frontend/.pnp.*
+frontend/.yarn/*
+!frontend/.yarn/patches
+!frontend/.yarn/plugins
+!frontend/.yarn/releases
+!frontend/.yarn/versions
+frontend/coverage
+frontend/.next/
+frontend/out/
+frontend/build
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnpm-debug.log*
+frontend/.vercel
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
