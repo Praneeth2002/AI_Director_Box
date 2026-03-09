@@ -110,7 +110,7 @@ Configure environment in `backend/.env`:
 GOOGLE_APPLICATION_CREDENTIALS=credentials.json
 GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 GOOGLE_CLOUD_LOCATION=us-central1
-PORT=8080
+PORT=9090
 ```
 *(Ensure your service account JSON is placed at `backend/credentials.json`)*
 
