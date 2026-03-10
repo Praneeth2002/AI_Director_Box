@@ -25,10 +25,11 @@ app.use(express.json());
 
 // Setup storage for video uploads
 const uploadDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+const clipsDir = path.join(__dirname, '../uploads/clips');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(clipsDir)) fs.mkdirSync(clipsDir, { recursive: true });
 app.use('/uploads', express.static(uploadDir));
+app.use('/clips', express.static(clipsDir));
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {

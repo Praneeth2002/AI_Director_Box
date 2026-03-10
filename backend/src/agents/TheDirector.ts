@@ -1,74 +1,134 @@
-import { GoogleGenAI } from '@google/genai';
 import { WebSocket } from 'ws';
+import path from 'path';
+import { cutClip } from '../utils/clipExtractor';
 
-let ai: GoogleGenAI;
+const clipsDir = path.join(__dirname, '../../uploads/clips');
 
-function getAI(): GoogleGenAI {
-    if (!ai) {
-        ai = new GoogleGenAI({
-            vertexai: true,
-            project: process.env.GOOGLE_CLOUD_PROJECT,
-            location: process.env.GOOGLE_CLOUD_LOCATION
-        });
-    }
-    return ai;
+// Parse "HH:MM:SS-HH:MM:SS" or "MM:SS-MM:SS" → start in seconds
+function getStartSec(timestamp: string): number {
+    const part = timestamp.split('-')[0].trim();
+    const segs = part.split(':').map(Number);
+    if (segs.length === 3) return segs[0] * 3600 + segs[1] * 60 + segs[2];
+    if (segs.length === 2) return segs[0] * 60 + segs[1];
+    return segs[0];
 }
 
-
-export async function runDirector(videoFilePath: string, tacticalData: any, commentaryScript: any, ws: WebSocket) {
-    const client = getAI();
-    console.log(`[The Director] Stitching the final Match Story together...`);
+export async function runDirector(
+    videoFilePath: string,
+    tacticalData: any[],
+    commentaryScript: any[],
+    ws: WebSocket
+) {
+    console.log(`[The Director] Building timestamp-synced broadcast timeline...`);
 
     try {
-        const prompt = `You are "The Director" of a live football broadcast. 
-You are responsible for weaving together raw tactical data and a pre-written commentary script into a single, cohesive timeline.
+        // ── Match each commentary item to its tactical event ────────────────
+        type TimelineEntry = {
+            tactic: any;
+            commentary: any;
+            startSec: number;
+        };
 
-Input Data:
-1. Tactics JSON: ${JSON.stringify(tacticalData)}
-2. Commentary Script JSON: ${JSON.stringify(commentaryScript)}
+        const timeline: TimelineEntry[] = [];
 
-Task:
-Generate a chronological timeline of the match using ONLY the exact strings provided below to trigger frontend events.
-You MUST interleave commentary texts with visual overlays. Do not invent new commentary.
+        for (const item of commentaryScript) {
+            // Find the matching tactic by event name
+            const tactic = tacticalData.find(t =>
+                t.event === item.related_tactics ||
+                (item.related_tactics || '').toLowerCase().includes((t.event || '').toLowerCase())
+            ) ?? tacticalData[0];
 
-Available String Formats (You must use exactly these prefixes):
-[COMMENTARY] <exact text from script>
-[VISUAL] <a short description of an overlay to show, e.g. "Showing 4-3-3 Formation">
-[VIDEO_CLIP] <a short title for a highlight clip>
+            if (!tactic) continue;
 
-Output Example:
-[VISUAL] Displaying Player Focus Card: Midfielder interception
-[COMMENTARY] <tone:excited> What a tackle!
-[VIDEO_CLIP] Highlight: Midfield Turn-over`;
+            const startSec = getStartSec(tactic.timestamp ?? '0:00');
+            timeline.push({ tactic, commentary: item, startSec });
+        }
 
-        // Note: For true interleaved streaming, we'd use generateContentStream
-        // To keep this local mock simple and robust, we generate it all and then mock the stream 
-        // to the client to simulate the experience.
-        const response = await client.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [prompt],
-            config: {
-                temperature: 0.2
+        // Sort strictly by video timestamp
+        timeline.sort((a, b) => a.startSec - b.startSec);
+
+        console.log(`[The Director] Timeline (${timeline.length} events):`,
+            timeline.map(e => `${e.startSec}s → ${e.tactic.event}`).join(' | '));
+
+        // ── Stream events to frontend ────────────────────────────────────────
+        for (const entry of timeline) {
+            const { tactic, commentary, startSec } = entry;
+
+            // Support both old format (text) and new format (lines[])
+            const lines: string[] = Array.isArray(commentary.lines)
+                ? commentary.lines
+                : (commentary.text ? [commentary.text] : []);
+
+            const isHigh = commentary.importance === 'high' ||
+                /goal|save|block|shot|strike|penalty/i.test(tactic.event ?? '');
+
+            // ── Low-importance: one commentary + optional visual ──────────────
+            if (!isHigh || lines.length === 0) {
+                if (lines[0]) {
+                    ws.send(JSON.stringify({
+                        type: 'commentary',
+                        data: lines[0],
+                        videoTimestamp: startSec
+                    }));
+                }
+                ws.send(JSON.stringify({
+                    type: 'visual',
+                    data: `Tracking: ${tactic.event}`,
+                    videoTimestamp: startSec
+                }));
+                await new Promise(r => setTimeout(r, 1500));
+                continue;
             }
-        });
 
-        const storyLines = response.text ? response.text.split('\n').filter(l => l.trim().length > 0) : [];
-        console.log(`[The Director] Generated Sequence:\n`, storyLines.join('\n'));
+            // ── High-importance: buildup → clip → climax → reaction ──────────
 
-        // Simulate streaming the output to the UI with slight delays
-        for (let i = 0; i < storyLines.length; i++) {
-            const line = storyLines[i].trim();
-
-            // Artificial delay to make it feel like a live stream
-            await new Promise(resolve => setTimeout(resolve, 600));
-
-            if (line.startsWith('[COMMENTARY]')) {
-                ws.send(JSON.stringify({ type: 'commentary', data: line.replace('[COMMENTARY]', '').trim() }));
-            } else if (line.startsWith('[VISUAL]')) {
-                ws.send(JSON.stringify({ type: 'visual', data: line.replace('[VISUAL]', '').trim() }));
-            } else if (line.startsWith('[VIDEO_CLIP]')) {
-                ws.send(JSON.stringify({ type: 'video_clip', data: line.replace('[VIDEO_CLIP]', '').trim() }));
+            // Line 0: buildup — fires at the event's actual video timestamp
+            if (lines[0]) {
+                ws.send(JSON.stringify({
+                    type: 'commentary',
+                    data: lines[0],
+                    videoTimestamp: startSec
+                }));
             }
+
+            // Cut the clip
+            let clipFilename: string | null = null;
+            if (tactic.timestamp) {
+                try {
+                    clipFilename = await cutClip(videoFilePath, clipsDir, tactic.event, tactic.timestamp);
+                } catch (clipErr) {
+                    console.error('[The Director] Clip cut failed:', clipErr);
+                }
+            }
+
+            // VIDEO_CLIP fires at startSec — triggers the replay on frontend
+            ws.send(JSON.stringify({
+                type: 'video_clip',
+                data: `Highlight: ${tactic.event}`,
+                clipUrl: clipFilename ? `/clips/${clipFilename}` : undefined,
+                videoTimestamp: startSec
+            }));
+
+            // Line 1 (climax) fires 2s into replay
+            if (lines[1]) {
+                ws.send(JSON.stringify({
+                    type: 'commentary',
+                    data: lines[1],
+                    videoTimestamp: startSec + 2
+                }));
+            }
+
+            // Line 2 (reaction) fires 5s into replay
+            if (lines[2]) {
+                ws.send(JSON.stringify({
+                    type: 'commentary',
+                    data: lines[2],
+                    videoTimestamp: startSec + 5
+                }));
+            }
+
+            // Small gap before next event
+            await new Promise(r => setTimeout(r, 1000));
         }
 
         ws.send(JSON.stringify({ type: 'status', data: 'Agent Pipeline Complete' }));

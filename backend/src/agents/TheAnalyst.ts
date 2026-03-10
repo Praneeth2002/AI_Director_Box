@@ -29,14 +29,22 @@ export async function runAnalyst(videoFilePath: string) {
         const fileSizeMB = (videoBytes.length / (1024 * 1024)).toFixed(2);
         console.log(`[The Analyst] Video loaded (${fileSizeMB} MB). Sending to Gemini Vision...`);
 
-        const prompt = `You are an expert football tactical analyst. Watch this video clip.
-Output a strict JSON array of tactical events that occur in the video.
-Each object in the array MUST have exactly these three properties:
-1. "timestamp": string (e.g., "00:00-00:05")
-2. "event": string (A short title for the event, e.g., "High Press" or "Through Ball")
-3. "tactics": string (A 1-2 sentence tactical breakdown of the player movement, formation, or play).
+        const prompt = `You are an expert football broadcast analyst. Watch this entire video clip carefully.
 
-If nothing interesting happens, return a single event describing the general run of play.`;
+Output a strict JSON array covering EVERY significant moment — both tactical AND atmosphere/broadcast moments.
+
+Event categories to detect and include:
+- TACTICAL: goals, shots, saves, tackles, fouls, corners, through balls, pressing, formations
+- ATMOSPHERE: crowd celebrations, fan reactions, player celebrations after a goal, team huddles, emotional moments, post-goal atmosphere
+- TRANSITIONS: kick-off, referee decisions, end of play
+
+Each object MUST have exactly these properties:
+1. "timestamp": string — start-end time (e.g., "0:00:02-0:00:05")
+2. "event": string — short descriptive title (e.g., "Penalty Goal", "Crowd Celebration", "Player Huddle")
+3. "tactics": string — 1-2 sentences describing what is visually happening and why it matters
+
+CRITICAL: Do NOT skip the end of the video. If fans are celebrating or players are reacting after a goal, that is a separate event with its own timestamp.
+If nothing significant happens in a segment, describe the general run of play.`;
 
         const response = await client.models.generateContent({
             model: 'gemini-2.5-flash',

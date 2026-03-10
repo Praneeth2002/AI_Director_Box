@@ -19,20 +19,49 @@ export async function runCommentator(tacticalData: any, persona: string = "excit
     console.log(`[The Commentator] Generating scripts based on tactical data using persona: ${persona}`);
 
     try {
-        const prompt = `You are a sports commentator acting in the persona of a: ${persona}.
-I will provide you with a JSON array of tactical events extracted from a football video clip.
+        const prompt = `You are a live sports commentator with the persona of: ${persona}.
+I will give you a JSON array of tactical events from a football video clip.
 
-For each event in the JSON, you MUST write exactly one line of commentary.
-Your commentary must sound exactly like the requested persona.
-You MUST prefix each line with an emotional tone tag that fits the moment. (Valid tags: <tone:excited>, <tone:calm>, <tone:anticipation>, <tone:disappointed>, <tone:funny>, <tone:analytical>)
+Your job is to write commentary for each event. The LENGTH of commentary depends on the event's importance:
+
+HIGH IMPORTANCE events (containing keywords: goal, penalty, save, block, strike, shot):
+  - Write a NARRATIVE ARC of exactly 3 commentary lines:
+    1. BUILDUP line: Set the context — who was involved, what was about to happen (~15 words)
+    2. CLIMAX line: The key moment itself — explosive, emotional, vivid (~8 words max)  
+    3. REACTION line: Aftermath — crowd, implications, analysis (~15 words)
+  - Use progressively intense tone tags: <tone:anticipation> → <tone:excited> → <tone:analytical>
+
+LOW IMPORTANCE events (passing, formation, pressing, possession, transition):
+  - Write exactly 1 commentary line (~12 words)
+  - Use an appropriate tone tag
+
+Persona rules:
+  - Every line MUST sound exactly like the requested persona: ${persona}
+  - For "tactical_nerd" or "analytical" styles, use measured language; for "excited_narrator", use exclamations; for "brazilian_narrator", use Portuguese flair.
+
+Valid tone tags: <tone:excited>, <tone:calm>, <tone:anticipation>, <tone:disappointed>, <tone:funny>, <tone:analytical>
 
 Input Tactical Events JSON:
 ${JSON.stringify(tacticalData, null, 2)}
 
-Output Format Requirements: 
-Return a strict JSON array where each object has two properties:
-1. "text": Your generated commentary string (including the <tone> prefix).
-2. "related_tactics": The exact "event" name from the input JSON you are reacting to.`;
+Output Format Requirements:
+Return a strict JSON array. Each object MUST have:
+1. "lines": string[] — array of commentary strings (3 items for high-importance, 1 item for low-importance). Each string includes its <tone:*> prefix.
+2. "related_tactics": the exact "event" name from the input JSON.
+3. "importance": "high" or "low"
+
+Example output:
+[
+  {
+    "lines": [
+      "<tone:anticipation> The striker receives it with her back to goal, spins brilliantly past two defenders.",
+      "<tone:excited> GOAL! Top corner! Absolute rocket!",
+      "<tone:analytical> That's clinical finishing — she gave the keeper absolutely no chance whatsoever."
+    ],
+    "related_tactics": "Goal Attempt",
+    "importance": "high"
+  }
+]`;
 
         const response = await client.models.generateContent({
             model: 'gemini-2.5-flash',
