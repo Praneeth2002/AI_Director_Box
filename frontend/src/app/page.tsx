@@ -18,6 +18,61 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const ws = useRef<WebSocket | null>(null);
 
+  // Maps each tone tag to distinct TTS voice properties so the voice
+  // actually sounds excited/calm/etc. rather than flat for every line.
+  const speakCommentary = (rawText: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
+    const toneMatch = rawText.match(/<tone:([^>]+)>/i);
+    const tone = toneMatch ? toneMatch[1].toLowerCase() : 'calm';
+    const cleanText = rawText.replace(/<tone:[^>]+>/gi, '').trim();
+
+    // Cancel any ongoing speech so new lines don't pile up silently
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+
+    // Each tone gets genuinely different voice parameters
+    switch (tone) {
+      case 'excited':
+        utterance.rate = 1.45;  // Fast, breathless
+        utterance.pitch = 1.6;   // High energy
+        utterance.volume = 1.0;
+        break;
+      case 'anticipation':
+        utterance.rate = 0.95;  // Slightly slower, building tension
+        utterance.pitch = 1.2;
+        utterance.volume = 0.95;
+        break;
+      case 'calm':
+        utterance.rate = 0.9;   // Measured, composed
+        utterance.pitch = 0.95;
+        utterance.volume = 0.85;
+        break;
+      case 'analytical':
+        utterance.rate = 0.85;  // Deliberate, considered
+        utterance.pitch = 0.85;
+        utterance.volume = 0.8;
+        break;
+      case 'disappointed':
+        utterance.rate = 0.8;   // Slow, deflated
+        utterance.pitch = 0.75;
+        utterance.volume = 0.75;
+        break;
+      case 'funny':
+        utterance.rate = 1.2;   // Upbeat and playful
+        utterance.pitch = 1.4;
+        utterance.volume = 1.0;
+        break;
+      default:
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 0.9;
+    }
+
+    window.speechSynthesis.speak(utterance);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -65,12 +120,7 @@ export default function Home() {
         } else {
           setEvents(prev => [...prev, payload]);
           if (payload.type === 'commentary') {
-            if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-              const cleanText = payload.data.replace(/<tone:[^>]+>/g, '').trim();
-              const utterance = new SpeechSynthesisUtterance(cleanText);
-              utterance.rate = 1.1; // Speak slightly faster for commentary speed
-              window.speechSynthesis.speak(utterance);
-            }
+            speakCommentary(payload.data);
           }
         }
       } catch (err) {

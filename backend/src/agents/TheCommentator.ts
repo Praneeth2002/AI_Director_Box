@@ -4,7 +4,11 @@ let ai: GoogleGenAI;
 
 function getAI(): GoogleGenAI {
     if (!ai) {
-        ai = new GoogleGenAI({ vertexai: true });
+        ai = new GoogleGenAI({
+            vertexai: true,
+            project: process.env.GOOGLE_CLOUD_PROJECT,
+            location: process.env.GOOGLE_CLOUD_LOCATION
+        });
     }
     return ai;
 }
@@ -31,7 +35,7 @@ Return a strict JSON array where each object has two properties:
 2. "related_tactics": The exact "event" name from the input JSON you are reacting to.`;
 
         const response = await client.models.generateContent({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-2.5-flash',
             contents: [prompt],
             config: {
                 // Force JSON output

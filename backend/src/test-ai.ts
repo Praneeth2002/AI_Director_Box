@@ -6,10 +6,9 @@ async function run() {
     try {
         console.log("Initializing AI...");
         const ai = new GoogleGenAI({
-            vertexai: {
-                project: process.env.GOOGLE_CLOUD_PROJECT,
-                location: process.env.GOOGLE_CLOUD_LOCATION
-            }
+            vertexai: true,
+            project: process.env.GOOGLE_CLOUD_PROJECT,
+            location: process.env.GOOGLE_CLOUD_LOCATION
         });
         console.log("AI initialized.");
     } catch (e) {

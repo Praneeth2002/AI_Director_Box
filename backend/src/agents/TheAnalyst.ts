@@ -6,7 +6,11 @@ let ai: GoogleGenAI;
 
 function getAI(): GoogleGenAI {
     if (!ai) {
-        ai = new GoogleGenAI({ vertexai: true });
+        ai = new GoogleGenAI({
+            vertexai: true,
+            project: process.env.GOOGLE_CLOUD_PROJECT,
+            location: process.env.GOOGLE_CLOUD_LOCATION
+        });
     }
     return ai;
 }
@@ -35,7 +39,7 @@ Each object in the array MUST have exactly these three properties:
 If nothing interesting happens, return a single event describing the general run of play.`;
 
         const response = await client.models.generateContent({
-            model: 'gemini-1.5-pro',
+            model: 'gemini-2.5-flash',
             contents: [
                 {
                     role: 'user',

@@ -5,7 +5,11 @@ let ai: GoogleGenAI;
 
 function getAI(): GoogleGenAI {
     if (!ai) {
-        ai = new GoogleGenAI({ vertexai: true });
+        ai = new GoogleGenAI({
+            vertexai: true,
+            project: process.env.GOOGLE_CLOUD_PROJECT,
+            location: process.env.GOOGLE_CLOUD_LOCATION
+        });
     }
     return ai;
 }
@@ -41,7 +45,7 @@ Output Example:
         // To keep this local mock simple and robust, we generate it all and then mock the stream 
         // to the client to simulate the experience.
         const response = await client.models.generateContent({
-            model: 'gemini-1.5-pro',
+            model: 'gemini-2.5-flash',
             contents: [prompt],
             config: {
                 temperature: 0.2
@@ -56,7 +60,7 @@ Output Example:
             const line = storyLines[i].trim();
 
             // Artificial delay to make it feel like a live stream
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            await new Promise(resolve => setTimeout(resolve, 600));
 
             if (line.startsWith('[COMMENTARY]')) {
                 ws.send(JSON.stringify({ type: 'commentary', data: line.replace('[COMMENTARY]', '').trim() }));
