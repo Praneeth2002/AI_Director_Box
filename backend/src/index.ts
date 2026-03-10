@@ -35,7 +35,6 @@ const storage = multer.diskStorage({
         cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
-        // Keep original name but add timestamp to avoid collisions
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         cb(null, `${uniqueSuffix}-${file.originalname}`);
     }
@@ -45,6 +44,22 @@ const upload = multer({ storage: storage });
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+// In-memory cache: filename → tactical analysis results
+const tacticsCache = new Map<string, any>();
+
+async function runAnalystPhase(filename: string, videoPath: string, ws: WebSocket) {
+    ws.send(JSON.stringify({ type: 'status', data: '🔍 The Analyst is watching the video...' }));
+    try {
+        const tactics = await runAnalyst(videoPath);
+        tacticsCache.set(filename, tactics);
+        console.log(`[Pipeline] Analysis cached for ${filename}:`, JSON.stringify(tactics).slice(0, 200));
+        ws.send(JSON.stringify({ type: 'analysis_complete', filename, eventCount: tactics.length }));
+    } catch (e: any) {
+        console.error('[Pipeline] ANALYST FAILED:', e?.message || e);
+        ws.send(JSON.stringify({ type: 'status', data: `❌ Analyst error: ${e?.message || 'Unknown error'}` }));
+    }
+}
+
 wss.on('connection', (ws: WebSocket) => {
     console.log('Frontend connected to AI Director orchestrator');
 
@@ -53,40 +68,44 @@ wss.on('connection', (ws: WebSocket) => {
             const parsed = JSON.parse(message.toString());
             console.log('received JSON command:', parsed.type);
 
-            if (parsed.type === 'start_pipeline' && parsed.filename) {
+            // Phase 1: triggered immediately on upload — run TheAnalyst only
+            if (parsed.type === 'start_analysis' && parsed.filename) {
                 const videoPath = path.join(uploadDir, parsed.filename);
-                let tactics: any = [];
-                let script: any = [];
+                runAnalystPhase(parsed.filename, videoPath, ws); // fire-and-forget
+                return;
+            }
 
-                // Step 1: Analyst
-                try {
-                    ws.send(JSON.stringify({ type: 'status', data: 'Initialising: The Analyst watching video...' }));
-                    tactics = await runAnalyst(videoPath);
-                    console.log('[Pipeline] Analyst complete:', JSON.stringify(tactics).slice(0, 200));
-                } catch (e: any) {
-                    console.error('[Pipeline] ANALYST FAILED:', e?.message || e, '\nStatus:', e?.status, '\nDetails:', JSON.stringify(e?.errorDetails || e?.errors || {}));
-                    ws.send(JSON.stringify({ type: 'status', data: `Error in Analyst: ${e?.message || 'Unknown error'}` }));
+            // Phase 2: triggered when user picks persona and clicks "Generate Commentary"
+            // Skips TheAnalyst — uses cached tactics
+            if (parsed.type === 'start_pipeline' && parsed.filename) {
+                const tactics = tacticsCache.get(parsed.filename);
+
+                if (!tactics) {
+                    ws.send(JSON.stringify({ type: 'status', data: '⚠️ Analysis not ready yet, please wait...' }));
                     return;
                 }
+
+                const videoPath = path.join(uploadDir, parsed.filename);
+                let script: any = [];
 
                 // Step 2: Commentator
                 try {
-                    ws.send(JSON.stringify({ type: 'status', data: `Initialising: The Commentator (${parsed.persona || 'excited_narrator'}) writing script...` }));
+                    ws.send(JSON.stringify({ type: 'status', data: `🎙️ Writing script as ${parsed.persona || 'excited_narrator'}...` }));
                     script = await runCommentator(tactics, parsed.persona);
                     console.log('[Pipeline] Commentator complete:', JSON.stringify(script).slice(0, 200));
                 } catch (e: any) {
-                    console.error('[Pipeline] COMMENTATOR FAILED:', e?.message || e, '\nStatus:', e?.status, '\nDetails:', JSON.stringify(e?.errorDetails || e?.errors || {}));
-                    ws.send(JSON.stringify({ type: 'status', data: `Error in Commentator: ${e?.message || 'Unknown error'}` }));
+                    console.error('[Pipeline] COMMENTATOR FAILED:', e?.message || e);
+                    ws.send(JSON.stringify({ type: 'status', data: `❌ Commentator error: ${e?.message || 'Unknown error'}` }));
                     return;
                 }
 
-                // Step 3: Director
+                // Step 3: Director — streams output line by line to the client
                 try {
-                    ws.send(JSON.stringify({ type: 'status', data: 'Initialising: The Director taking control...' }));
+                    ws.send(JSON.stringify({ type: 'status', data: '🎬 The Director is taking control...' }));
                     await runDirector(videoPath, tactics, script, ws);
                 } catch (e: any) {
-                    console.error('[Pipeline] DIRECTOR FAILED:', e?.message || e, '\nStatus:', e?.status, '\nDetails:', JSON.stringify(e?.errorDetails || e?.errors || {}));
-                    ws.send(JSON.stringify({ type: 'status', data: `Error in Director: ${e?.message || 'Unknown error'}` }));
+                    console.error('[Pipeline] DIRECTOR FAILED:', e?.message || e);
+                    ws.send(JSON.stringify({ type: 'status', data: `❌ Director error: ${e?.message || 'Unknown error'}` }));
                 }
             }
         } catch (e) {
@@ -103,15 +122,11 @@ app.get('/health', (req, res) => {
     res.json({ status: 'healthy', service: 'AI Director Orchestrator' });
 });
 
-// Endpoint to handle video uploads from the frontend
 app.post('/upload', upload.single('video'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No video file provided' });
     }
-
-    console.log(`Video uploaded for testing: ${req.file.filename}`);
-    // In the future, this endpoint will trigger the Agent pipeline!
-
+    console.log(`Video uploaded: ${req.file.filename}`);
     res.json({
         message: 'Video uploaded successfully',
         filename: req.file.filename,
