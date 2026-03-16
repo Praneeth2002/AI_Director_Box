@@ -14,7 +14,7 @@ function getAI(): GoogleGenAI {
 }
 
 
-export async function runCommentator(tacticalData: any, persona: string = "excited_narrator") {
+export async function runCommentator(tacticalData: any, persona: string = "excited_narrator", pastContext: string = "") {
     const client = getAI();
     console.log(`[The Commentator] Generating scripts based on tactical data using persona: ${persona}`);
 
@@ -22,7 +22,7 @@ export async function runCommentator(tacticalData: any, persona: string = "excit
         const prompt = `You are a live sports commentator with the persona of: ${persona}.
 I will give you a JSON array of tactical events from a football video clip.
 
-Your job is to write commentary for each event. The LENGTH of commentary depends on the event's importance:
+${pastContext ? `PREVIOUS CHUNK CONTEXT TO AVOID REPETITION:\n${pastContext}\n\n` : ''}Your job is to write commentary for each event. The LENGTH of commentary depends on the event's importance:
 
 HIGH IMPORTANCE events (containing keywords: goal, penalty, save, block, strike, shot):
   - Write a NARRATIVE ARC of exactly 3 commentary lines:

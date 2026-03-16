@@ -15,7 +15,7 @@ function getAI(): GoogleGenAI {
     return ai;
 }
 
-export async function runAnalyst(videoFilePath: string) {
+export async function runAnalyst(videoFilePath: string, pastContext: string = "") {
     const client = getAI();
     console.log(`[The Analyst] Processing video: ${videoFilePath}`);
 
@@ -29,18 +29,24 @@ export async function runAnalyst(videoFilePath: string) {
         const fileSizeMB = (videoBytes.length / (1024 * 1024)).toFixed(2);
         console.log(`[The Analyst] Video loaded (${fileSizeMB} MB). Sending to Gemini Vision...`);
 
-        const prompt = `You are an expert football broadcast analyst. Watch this short video chunk which is a segment of a larger live match.
+        const prompt = `You are an expert football broadcast analyst. Watch this short 10-15 second video chunk which is a segment of a larger live match.
 
-Output a strict JSON array covering EVERY significant moment in this chunk — both tactical AND atmosphere/broadcast moments.
+${pastContext ? `PREVIOUS CHUNK CONTEXT (DO NOT RE-REPORT THESE EVENTS):\n${pastContext}\n\n` : ''}Output a strict JSON array covering ONLY the most significant, distinct moments in this chunk.
+
+CRITICAL INSTRUCTIONS TO PREVENT SPAM/OVER-REPORTING:
+1. DO NOT slice a single continuous sequence into multiple events. If a player scores, celebrates, and the crowd cheers, that is ONE single "Goal and Celebration" event, NOT three separate events.
+2. A single chunk should rarely contain more than 1 or 2 events total.
+3. If the chunk is just players passing around the back passing with nothing significant happening, return an empty array [].
+4. Group related simultaneous actions together into a single summary event.
+5. EXTREMELY IMPORTANT: If you see players celebrating, check the PREVIOUS CHUNK CONTEXT. If a goal was already reported, DO NOT report a new goal or new celebration. Return an empty array [], as the celebration is just ongoing.
 
 Event categories to detect and include:
-- TACTICAL: goals, shots, saves, tackles, fouls, corners, through balls, pressing, formations
-- ATMOSPHERE: crowd celebrations, fan reactions, player celebrations after a goal, team huddles, emotional moments, post-goal atmosphere
-- TRANSITIONS: kick-off, referee decisions, end of play
+- TACTICAL: goals, shots, saves, tackles, fouls, corners
+- ATMOSPHERE: crowd celebrating, post-goal atmosphere (grouped with the goal if possible)
 
 Each object MUST have exactly these properties:
 1. "timestamp": string — start-end time (e.g., "0:00:02-0:00:05")
-2. "event": string — short descriptive title (e.g., "Penalty Goal", "Crowd Celebration", "Player Huddle")
+2. "event": string — short descriptive title (e.g., "Penalty Goal", "Crowd Celebration")
 3. "tactics": string — 1-2 sentences describing what is visually happening and why it matters
 
 CRITICAL: Do NOT skip the end of the video. If fans are celebrating or players are reacting after a goal, that is a separate event with its own timestamp.

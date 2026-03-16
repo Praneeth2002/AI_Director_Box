@@ -27,7 +27,8 @@ export async function runDirector(
         type TimelineEntry = {
             tactic: any;
             commentary: any;
-            startSec: number;
+            exactEventSec: number;
+            chunkStartSec: number; // Keep track of the chunk boundary to start speaking early
         };
 
         const timeline: TimelineEntry[] = [];
@@ -42,19 +43,19 @@ export async function runDirector(
             if (!tactic) continue;
 
             const localStartSec = getStartSec(tactic.timestamp ?? '0:00');
-            const globalStartSec = localStartSec + chunkStartTimeSec;
-            timeline.push({ tactic, commentary: item, startSec: globalStartSec });
+            const exactEventSec = localStartSec + chunkStartTimeSec;
+            timeline.push({ tactic, commentary: item, exactEventSec, chunkStartSec: chunkStartTimeSec });
         }
 
         // Sort strictly by video timestamp
-        timeline.sort((a, b) => a.startSec - b.startSec);
+        timeline.sort((a, b) => a.exactEventSec - b.exactEventSec);
 
         console.log(`[The Director] Timeline (${timeline.length} events):`,
-            timeline.map(e => `${e.startSec}s → ${e.tactic.event}`).join(' | '));
+            timeline.map(e => `${e.exactEventSec}s → ${e.tactic.event}`).join(' | '));
 
         // ── Stream events to frontend ────────────────────────────────────────
         for (const entry of timeline) {
-            const { tactic, commentary, startSec } = entry;
+            const { tactic, commentary, exactEventSec, chunkStartSec } = entry;
 
             // Support both old format (text) and new format (lines[])
             const lines: string[] = Array.isArray(commentary.lines)
@@ -70,13 +71,14 @@ export async function runDirector(
                     ws.send(JSON.stringify({
                         type: 'commentary',
                         data: lines[0],
-                        videoTimestamp: startSec
+                        // Fire general commentary immediately at chunk start to prevent dead air
+                        videoTimestamp: chunkStartSec 
                     }));
                 }
                 ws.send(JSON.stringify({
                     type: 'visual',
                     data: `Tracking: ${tactic.event}`,
-                    videoTimestamp: startSec
+                    videoTimestamp: exactEventSec
                 }));
                 await new Promise(r => setTimeout(r, 1500));
                 continue;
@@ -84,12 +86,12 @@ export async function runDirector(
 
             // ── High-importance: buildup → clip → climax → reaction ──────────
 
-            // Line 0: buildup — fires at the event's actual video timestamp
+            // Line 0: buildup — fire early at the start of the chunk to build anticipation
             if (lines[0]) {
                 ws.send(JSON.stringify({
                     type: 'commentary',
                     data: lines[0],
-                    videoTimestamp: startSec
+                    videoTimestamp: chunkStartSec
                 }));
             }
 
@@ -103,12 +105,12 @@ export async function runDirector(
                 }
             }
 
-            // VIDEO_CLIP fires at startSec — triggers the replay on frontend
+            // VIDEO_CLIP fires at exact event time — triggers the replay on frontend
             ws.send(JSON.stringify({
                 type: 'video_clip',
                 data: `Highlight: ${tactic.event}`,
                 clipUrl: clipFilename ? `/clips/${clipFilename}` : undefined,
-                videoTimestamp: startSec
+                videoTimestamp: exactEventSec
             }));
 
             // Line 1 (climax) fires 2s into replay
@@ -116,7 +118,7 @@ export async function runDirector(
                 ws.send(JSON.stringify({
                     type: 'commentary',
                     data: lines[1],
-                    videoTimestamp: startSec + 2
+                    videoTimestamp: exactEventSec + 2
                 }));
             }
 
@@ -125,7 +127,7 @@ export async function runDirector(
                 ws.send(JSON.stringify({
                     type: 'commentary',
                     data: lines[2],
-                    videoTimestamp: startSec + 5
+                    videoTimestamp: exactEventSec + 5
                 }));
             }
 

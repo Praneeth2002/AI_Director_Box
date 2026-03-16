@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 
 type StoryEvent = {
-  type: 'status' | 'commentary' | 'visual' | 'video_clip';
+  type: 'status' | 'commentary' | 'visual' | 'video_clip' | 'play_video';
   data: string;
   clipUrl?: string;
 };
@@ -53,7 +53,7 @@ export default function Home() {
   const replayPhaseRef = useRef<ReplayPhase>(null);
   const replayEnabledRef = useRef(true);
   // Timestamp queue — items fire when video.currentTime crosses their targetTime
-  const timestampQueue = useRef<Array<{ text: string; tone: string; targetTime: number }>>([]);
+  const timestampQueue = useRef<Array<{ text: string; tone: string; targetTime: number; originalEvent?: StoryEvent }>>([]);
   // Ref for selected voice — keeps processQueue's closure in sync without re-registering
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
@@ -96,7 +96,7 @@ export default function Home() {
     window.speechSynthesis.speak(u);
   };
 
-  const speakCommentary = (rawText: string, videoTimestamp?: number) => {
+  const speakCommentary = (rawText: string, videoTimestamp?: number, originalEvent?: StoryEvent) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     const toneMatch = rawText.match(/<tone:([^>]+)>/i);
     const tone = toneMatch ? toneMatch[1].toLowerCase() : 'calm';
@@ -104,10 +104,17 @@ export default function Home() {
 
     if (videoTimestamp !== undefined) {
       // Schedule for when the video crosses this timestamp
-      timestampQueue.current.push({ text, tone, targetTime: videoTimestamp });
+      timestampQueue.current.push({ text, tone, targetTime: videoTimestamp, originalEvent });
       timestampQueue.current.sort((a, b) => a.targetTime - b.targetTime);
     } else {
       // No timestamp — queue immediately
+      if (originalEvent) {
+        setEvents(prev => {
+          const updated = [...prev, originalEvent];
+          setTimeout(() => feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }), 50);
+          return updated;
+        });
+      }
       ttsQueue.current.push({ text, tone });
       processQueue();
     }
@@ -122,6 +129,14 @@ export default function Home() {
     timestampQueue.current = timestampQueue.current.filter(item => item.targetTime > now);
 
     for (const item of due) {
+      if (item.originalEvent) {
+        setEvents(prev => {
+          const updated = [...prev, item.originalEvent!];
+          setTimeout(() => feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }), 50);
+          return updated;
+        });
+      }
+
       if (item.text.startsWith('__REPLAY__')) {
         // Dispatch replay: extract clipUrl and title from the sentinel
         const payload = item.text.replace('__REPLAY__', '');
@@ -185,6 +200,11 @@ export default function Home() {
 
         if (payload.type === 'status') {
           setStatus(payload.data);
+          setEvents(prev => {
+            const updated = [...prev, payload];
+            setTimeout(() => feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }), 50);
+            return updated;
+          });
           return;
         }
 
@@ -195,34 +215,45 @@ export default function Home() {
           return;
         }
 
-        setEvents(prev => {
-          const updated = [...prev, payload];
-          setTimeout(() => feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }), 50);
-          return updated;
-        });
-
-        if (payload.type === 'commentary') {
-          speakCommentary(payload.data, (payload as any).videoTimestamp);
-          // Auto-start main video on first event if not yet playing
+        if (payload.type === 'play_video') {
           if (mainVideoRef.current?.paused) {
             mainVideoRef.current.currentTime = 0;
             mainVideoRef.current.volume = 0.2;
             mainVideoRef.current.play().catch(() => { });
           }
+          return;
+        }
+
+        if (payload.type === 'commentary') {
+          speakCommentary(payload.data, (payload as any).videoTimestamp, payload);
+          return;
+        }
+        
+        if (payload.type === 'visual') {
+           // Queue visuals just like commentary
+           timestampQueue.current.push({ text: '', tone: '', targetTime: (payload as any).videoTimestamp || 0, originalEvent: payload });
+           timestampQueue.current.sort((a, b) => a.targetTime - b.targetTime);
+           return;
         }
 
         if (payload.type === 'video_clip') {
           if (replayEnabledRef.current && replayPhaseRef.current === null && payload.clipUrl) {
             const fireAt: number | undefined = (payload as any).videoTimestamp;
             if (fireAt !== undefined) {
-              // Schedule replay via timestamp queue \u2014 fires when video crosses this second
+              // Schedule replay via timestamp queue AND buffer for UI
               timestampQueue.current.push({
                 text: `__REPLAY__${payload.clipUrl}||${payload.data}`,
                 tone: '',
-                targetTime: fireAt
+                targetTime: fireAt,
+                originalEvent: payload
               });
               timestampQueue.current.sort((a, b) => a.targetTime - b.targetTime);
             } else {
+              setEvents(prev => {
+                const updated = [...prev, payload];
+                setTimeout(() => feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }), 50);
+                return updated;
+              });
               setTimeout(() => startReplay(payload.clipUrl!, payload.data), 800);
             }
           }
@@ -268,13 +299,8 @@ export default function Home() {
     ws.current.send(JSON.stringify({ type: 'start_pipeline', filename: uploadedFileName, persona }));
     setEvents([]);
     setPhase('broadcasting');
-
-    // Auto-start video playback exactly when the broadcast starts
-    if (mainVideoRef.current) {
-      mainVideoRef.current.currentTime = 0;
-      mainVideoRef.current.volume = 0.2;
-      mainVideoRef.current.play().catch(() => {});
-    }
+    
+    // Video will auto-start (from t=0) exactly when the first piece of commentary arrives over WebSocket
   };
 
   const isConnected = status.includes('Connected') || status.includes('done') || status.includes('✅');

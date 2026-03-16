@@ -53,9 +53,12 @@ export function parseTimestamp(ts: string): { start: number; duration: number } 
     };
     const rawStart = toSecs(parts[0]);
     const rawEnd = toSecs(parts[1] ?? parts[0]);
-    const start = Math.max(0, rawStart - 1);   // 1s buffer before
-    const end = rawEnd + 1;                   // 1s buffer after
-    return { start, duration: Math.max(end - start, 3) };
+    const prePadding = parseInt(process.env.CLIP_PRE_PADDING_SECONDS || '3', 10);
+    const postPadding = parseInt(process.env.CLIP_POST_PADDING_SECONDS || '3', 10);
+
+    const start = Math.max(0, rawStart - prePadding);
+    const end = rawEnd + postPadding;
+    return { start, duration: Math.max(end - start, prePadding + postPadding) };
 }
 
 // Fuzzy-match a clip title like "Highlight: Penalty Goal" against tactic event names
@@ -104,7 +107,8 @@ export function cutClip(
 }
 
 // Extract a specific time chunk from the video. Returns the saved filename.
-// Uses -c copy (stream copy, no re-encode) for near-instant extraction.
+// Removes -c copy to force re-encoding, guaranteeing millisecond-accurate slicing 
+// (avoiding keyframe snapping) so we don't accidentally analyse the same clip twice.
 export function extractChunk(
     videoPath: string,
     chunksDir: string,
@@ -123,7 +127,7 @@ export function extractChunk(
         ffmpeg(videoPath)
             .setStartTime(startTime)
             .setDuration(duration)
-            .outputOptions('-c copy')
+            .outputOptions(['-preset ultrafast', '-threads 2'])
             .output(outputPath)
             .on('end', () => {
                 resolve(filename);

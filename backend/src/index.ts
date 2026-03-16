@@ -82,6 +82,8 @@ wss.on('connection', (ws: WebSocket) => {
 
                     let currentStartSec = 0;
                     let chunkIndex = 0;
+                    const broadcastStartTimeMs = Date.now();
+                    let pastContext = "";
 
                     // 2. Loop through the video in chunks
                     while (currentStartSec < durationSec && activeStreamId === streamId) {
@@ -96,17 +98,34 @@ wss.on('connection', (ws: WebSocket) => {
                         const chunkFilename = await extractChunk(videoPath, clipsDir, currentStartSec, chunkDuration, chunkIndex);
                         const chunkPath = path.join(clipsDir, chunkFilename);
 
-                        // Step 1: The Analyst (detects tactics in this chunk)
-                        const tactics = await runAnalyst(chunkPath);
+                        // Step 1: The Analyst (detects tactics in this chunk, aware of the past)
+                        const tactics = await runAnalyst(chunkPath, pastContext);
                         console.log(`[Pipeline] Chunk ${chunkIndex} analysis complete. Events: ${tactics.length}`);
 
                         if (tactics.length > 0) {
-                            // Step 2: The Commentator (writes script for this chunk)
-                            const script = await runCommentator(tactics, persona);
+                            // Step 2: The Commentator (writes script for this chunk, aware of the past)
+                            const script = await runCommentator(tactics, persona, pastContext);
                             console.log(`[Pipeline] Chunk ${chunkIndex} script generated.`);
 
                             // Step 3: The Director (streams the timeline, offset by currentStartSec)
                             await runDirector(videoPath, tactics, script, ws, currentStartSec);
+                            
+                            // 4. Update memory mapping so future chunks know what just happened
+                            for (const t of tactics) {
+                                pastContext += `[Previously recorded around ${currentStartSec}s] ${t.event} - ${t.tactics}\n`;
+                            }
+                            
+                            // Keep memory window clean (last ~15 events max to prevent token bloat)
+                            const memoryLines = pastContext.trim().split('\n');
+                            if (memoryLines.length > 15) {
+                                pastContext = memoryLines.slice(memoryLines.length - 15).join('\n') + '\n';
+                            }
+                        }
+
+                        // Explicitly tell the UI to start playing the video once we have buffered the first chunk
+                        if (chunkIndex === 0) {
+                            ws.send(JSON.stringify({ type: 'play_video' }));
+                            console.log('[Pipeline] Signaled frontend to start video playback');
                         }
 
                         // Cleanup the temporary chunk file to save space
@@ -117,6 +136,19 @@ wss.on('connection', (ws: WebSocket) => {
                         // Move to next chunk
                         currentStartSec += chunkDuration;
                         chunkIndex++;
+
+                        // PACE THE LOOP to avoid hitting Gemini API Rate Limits (15 RPM)
+                        // The loop should stay roughly 1 chunk ahead of the actual playback.
+                        const elapsedWallClockSec = (Date.now() - broadcastStartTimeMs) / 1000;
+                        const bufferedVideoSec = chunkIndex * CHUNK_DURATION_SECONDS;
+                        
+                        // If backend is more than 1 chunk (e.g. 10s) ahead of what the user is watching, sleep.
+                        const aheadBySec = bufferedVideoSec - elapsedWallClockSec;
+                        if (aheadBySec > CHUNK_DURATION_SECONDS) {
+                            const sleepMs = (aheadBySec - CHUNK_DURATION_SECONDS) * 1000;
+                            console.log(`[Pacing] Backend is too fast (${aheadBySec.toFixed(1)}s ahead). Sleeping for ${Math.round(sleepMs)}ms to save API Quota...`);
+                            await new Promise(r => setTimeout(r, sleepMs));
+                        }
                     }
 
                     if (activeStreamId === streamId) {
