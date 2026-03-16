@@ -1,0 +1,10 @@
+.gcloudignore
+.git
+.gitignore
+node_modules/
+dist/
+uploads/
+credentials.json
+.env
+**/*.log
+.next/

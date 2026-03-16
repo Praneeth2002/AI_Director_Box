@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import path from 'path';
 import { cutClip } from '../utils/clipExtractor';
+import { uploadToGCS, getServeUrl } from '../utils/gcsStorage';
 
 const clipsDir = path.join(__dirname, '../../uploads/clips');
 
@@ -121,10 +122,17 @@ export async function runDirector(
 
             // VIDEO_CLIP now fires 4s after exact event time — to ask the user "Want to see a replay?"
             // It bundles the climax (Line 1) and reaction (Line 2) to be played DURING the replay.
+            let serveClipUrl = clipFilename ? `/clips/${clipFilename}` : undefined;
+            if (clipFilename) {
+                const clipPath = path.join(clipsDir, clipFilename);
+                const gcsClipUrl = await uploadToGCS(clipPath, 'clips');
+                serveClipUrl = getServeUrl(`/clips/${clipFilename}`, gcsClipUrl) ?? serveClipUrl;
+            }
+
             ws.send(JSON.stringify({
                 type: 'video_clip',
                 data: `Highlight: ${tactic.event}`,
-                clipUrl: clipFilename ? `/clips/${clipFilename}` : undefined,
+                clipUrl: serveClipUrl,
                 videoTimestamp: exactEventSec + 4,
                 replayCommentary: {
                     climax: lines[1] ? { text: lines[1].text, audioUrl: lines[1].audioUrl, delay: 2 } : undefined,

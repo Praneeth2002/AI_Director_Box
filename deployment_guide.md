@@ -1,6 +1,6 @@
 # 🚀 Hosting AI Director's Box on Google Cloud
 
-This guide outlines the production architecture for deploying the AI Director's Box on GCP.
+This guide outlines the production architecture and provides automation scripts for deploying the AI Director's Box on GCP.
 
 ## 🏗️ Architecture Overview
 
@@ -8,71 +8,96 @@ This guide outlines the production architecture for deploying the AI Director's 
 - **Backend API**: Express on **Cloud Run** (Containerized with FFmpeg).
 - **Storage**: **Google Cloud Storage (GCS)** Buckets for uploads, clips, and audio.
 - **AI Services**: Vertex AI (Gemini, Imagen) & Google Cloud Text-to-Speech.
-- **Security**: **Secret Manager** for API keys and Service Accounts for IAM permissions.
 
 ---
 
-## 1. Backend: Cloud Run (Containers)
+## ⚡ Automated Deployment
 
-Cloud Run is ideal because it scales to zero when not in use and handles high-burst analysis well.
+We have provided a `deploy.sh` script in the `backend/` directory to automate the build and deployment process.
 
-### 🐳 Dockerfile Requirements:
-You must include `ffmpeg` in your backend container.
+### Prerequisites:
+1.  **Google Cloud SDK** installed and authenticated (`gcloud auth login`).
+2.  **Project ID** set (`gcloud config set project YOUR_PROJECT_ID`).
+
+### Execution:
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+This script will:
+- Enable Cloud Run, Artifact Registry, Vertex AI, and TTS APIs.
+- Build the container image using **Cloud Build**.
+- Deploy the service to **Cloud Run** with **Session Affinity** enabled (required for WebSockets).
+
+---
+
+## 🐳 Backend: Dockerization
+
+The backend uses a specialized `Dockerfile` to ensure FFmpeg is available in the Cloud Run environment.
+
 ```dockerfile
+# (See backend/Dockerfile for full content)
 FROM node:20
 RUN apt-get update && apt-get install -y ffmpeg
-WORKDIR /app
-COPY . .
-RUN npm install
-CMD ["npm", "start"]
-```
-
-### 🛰️ WebSocket Note:
-Enable **Session Affinity** in Cloud Run settings to ensure WebSocket connections remain stable.
-
----
-
-## 2. Media: Google Cloud Storage (GCS)
-
-Local file storage (`/uploads`) won't work in Cloud Run because the filesystem is ephemeral.
-
-- **Step A**: Create a bucket `your-project-media`.
-- **Step B**: Update `clipExtractor.ts` and [TheCommentator.ts](file:///c:/Sources/AI_Director_Box/backend/src/agents/TheCommentator.ts) to upload results directly to GCS instead of `fs.writeFileSync`.
-- **Step C**: Use Signed URLs or Public Read access for the frontend to play the videos/audio.
-
----
-
-## 3. Frontend: Firebase Hosting
-
-The fastest way to serve your Next.js frontend globally.
-
-```bash
-npm install -g firebase-tools
-firebase init hosting
-firebase deploy
+...
 ```
 
 ---
 
-## 4. Setup Checklist
+## 🛰️ Frontend Configuration
 
-1. **Enable APIs**:
-   - Vertex AI API
-   - Cloud Text-to-Speech API
-   - Cloud Run API
-   - Secret Manager API
-2. **Service Account**:
-   - Create a service account with `Vertex AI User` and `Storage Object Admin` roles.
-   - Attach this account to your Cloud Run service.
-3. **IAM Permissions**:
-   - Ensure the service account has permission to read/write to your GCS bucket.
+The frontend is configured to use environment variables for API and WebSocket URLs.
+
+1.  **Environment Variables**: Create a `.env.local` (or set in your hosting console):
+    ```env
+    NEXT_PUBLIC_API_URL=https://your-backend-url.a.run.app
+    NEXT_PUBLIC_WS_URL=wss://your-backend-url.a.run.app
+    ```
 
 ---
 
-## 🛠️ Recommended CI/CD
+## 💾 Media Persistence: Google Cloud Storage (GCS)
 
-Use **Cloud Build** to automatically deploy whenever you push to your `story` branch:
-1. Push to GitHub.
-2. Cloud Build triggers.
-3. Build Docker image → Artifact Registry.
-4. Deploy to Cloud Run.
+> [!IMPORTANT]
+> Cloud Run filesystems are ephemeral. To persist uploads and AI-generated clips, you must integrate GCS.
+
+### 🛠️ Integration Steps:
+
+1.  **Create a Bucket**:
+    ```bash
+    gsutil mb gs://your-project-media
+    ```
+
+2.  **Update Backend Logic**:
+    Modify `clipExtractor.ts` and `TheCommentator.ts` to use the `@google-cloud/storage` SDK.
+    - **Upload**: Instead of `fs.writeFileSync`, stream files to GCS.
+    - **Serve**: Use Signed URLs or make the bucket public (with caution) to provide `audioUrl` and `clipUrl` to the frontend.
+
+3.  **Permissions**:
+    The Cloud Run service account must have the `Storage Object Admin` role.
+
+---
+
+## 🛠️ Automated CI/CD (Optional)
+
+Include the `cloudbuild.yaml` in your repository to automate deployments on every `git push`.
+
+```yaml
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/ai-director-backend', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/ai-director-backend']
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args:
+  - 'run'
+  - 'deploy'
+  - 'ai-director-backend'
+  - '--image'
+  - 'gcr.io/$PROJECT_ID/ai-director-backend'
+  - '--region'
+  - 'us-central1'
+  - '--session-affinity'
+```

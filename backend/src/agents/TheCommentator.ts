@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import * as textToSpeech from '@google-cloud/text-to-speech';
 import fs from 'fs';
 import path from 'path';
+import { uploadToGCS, getServeUrl } from '../utils/gcsStorage';
 
 let ai: GoogleGenAI;
 let ttsClient: textToSpeech.TextToSpeechClient;
@@ -125,7 +126,11 @@ Example output:
                     const filepath = path.join(audioDir, filename);
                     fs.writeFileSync(filepath, response.audioContent as Uint8Array, 'binary');
                     
-                    return { text: rawLine, audioUrl: `/audio/${filename}` };
+                    // Upload to GCS in production
+                    const gcsUrl = await uploadToGCS(filepath, 'audio');
+                    const serveUrl = getServeUrl(`/audio/${filename}`, gcsUrl);
+                    
+                    return { text: rawLine, audioUrl: serveUrl };
                 } catch (e) {
                     console.error('[The Commentator] TTS Generation Failed:', e);
                     return { text: rawLine, audioUrl: null };

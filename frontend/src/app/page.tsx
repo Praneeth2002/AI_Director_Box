@@ -70,6 +70,10 @@ function MermaidRenderer({ diagram }: { diagram: string }) {
   );
 }
 
+// --- Environment Configuration ---
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:9090';
+const WS_BASE_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:9090';
+
 export default function Home() {
   const [phase, setPhase] = useState<AppPhase>('idle');
   const [events, setEvents] = useState<StoryEvent[]>([]);
@@ -141,7 +145,7 @@ export default function Home() {
       return;
     }
 
-    const audio = new Audio(`http://localhost:9090${next.audioUrl}`);
+    const audio = new Audio(`${API_BASE_URL}${next.audioUrl}`);
     currentAudioRef.current = audio;
 
     audio.onended = () => {
@@ -260,7 +264,7 @@ export default function Home() {
     setReplayPromptInfo(null);
     replayPhaseRef.current = 'intro'; // keep ref in sync BEFORE setting state
     setReplayTitle(title);
-    setReplayUrl(`http://localhost:9090${clipUrl}`);
+    setReplayUrl(`${API_BASE_URL}${clipUrl}`);
     setReplayPhase('intro');
     
     setTimeout(() => {
@@ -333,7 +337,7 @@ export default function Home() {
 
   // ─── WebSocket ────────────────────────────────────────────────────────────
   useEffect(() => {
-    ws.current = new WebSocket('ws://localhost:9090');
+    ws.current = new WebSocket(WS_BASE_URL);
     ws.current.onopen = () => setStatus('Connected to AI Director');
     ws.current.onclose = () => setStatus('Disconnected from Director');
 
@@ -456,7 +460,7 @@ export default function Home() {
     formData.append('video', file);
 
     try {
-      const res = await fetch('http://localhost:9090/upload', { method: 'POST', body: formData });
+      const res = await fetch(`${API_BASE_URL}/upload`, { method: 'POST', body: formData });
       if (!res.ok) throw new Error('Upload failed');
       const result = await res.json();
       setUploadedFileName(result.filename);
@@ -514,7 +518,7 @@ export default function Home() {
 
   // --- Share Replay Function ---
   const shareReplay = async (clipUrl: string, title: string) => {
-     const fullUrl = `http://localhost:9090${clipUrl}`;
+     const fullUrl = `${API_BASE_URL}${clipUrl}`;
      const shareText = `Check out this highlight: ${title} 🔥 Powered by AI Director's Box!`;
      
      if (navigator.share) {

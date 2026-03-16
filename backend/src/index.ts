@@ -11,6 +11,7 @@ import { runAnalyst } from './agents/TheAnalyst';
 import { runCommentator } from './agents/TheCommentator';
 import { runDirector } from './agents/TheDirector';
 import { runStoryteller } from './agents/TheStoryteller';
+import { uploadToGCS, getServeUrl } from './utils/gcsStorage';
 
 dotenv.config();
 
@@ -191,15 +192,21 @@ app.get('/health', (req, res) => {
     res.json({ status: 'healthy', service: 'AI Director Orchestrator' });
 });
 
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('video'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No video file provided' });
     }
     console.log(`Video uploaded: ${req.file.filename}`);
+
+    // Upload to GCS
+    const gcsUrl = await uploadToGCS(req.file.path, 'videos');
+    const serveUrl = getServeUrl(`/uploads/${req.file.filename}`, gcsUrl);
+
     res.json({
         message: 'Video uploaded successfully',
         filename: req.file.filename,
-        path: req.file.path
+        path: req.file.path,
+        url: serveUrl
     });
 });
 

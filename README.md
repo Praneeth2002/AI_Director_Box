@@ -14,6 +14,7 @@ It deeply leverages the native multimodal and interleaved capabilities of Google
 - **[Submission Draft & Findings](.gemini/antigravity/brain/23172d17-113f-4d6c-be67-ee0601b22fb9/submission_draft.md)**
 - **[Architecture Diagram](#architecture--the-multi-agent-system)**
 - **[Proof of GCP Deployment](deployment_guide.md)**
+- **[Deployment Script](deploy.sh)**
 
 ---
 

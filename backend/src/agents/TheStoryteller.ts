@@ -1,4 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
+import { uploadToGCS, getServeUrl } from '../utils/gcsStorage';
+import path from 'path';
+import fs from 'fs';
 
 let ai: GoogleGenAI;
 
@@ -79,9 +82,12 @@ Return a strict JSON object with these properties:
                     if (imageObj && imageObj.imageBytes) {
                         const base64Image = imageObj.imageBytes;
                         const filename = `storybook_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
-                        const filepath = require('path').join(__dirname, '../../uploads/clips', filename);
-                        require('fs').writeFileSync(filepath, Buffer.from(base64Image, 'base64'));
-                        imageUrl = `http://localhost:9090/clips/${filename}`;
+                        const filepath = path.join(__dirname, '../../uploads/clips', filename);
+                        fs.writeFileSync(filepath, Buffer.from(imageObj.imageBytes, 'base64'));
+                        
+                        // Upload to GCS
+                        const gcsUrl = await uploadToGCS(filepath, 'clips');
+                        imageUrl = getServeUrl(`/clips/${filename}`, gcsUrl);
                     }
                 }
             } catch (imageErr) {
