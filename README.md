@@ -10,6 +10,13 @@ It deeply leverages the native multimodal and interleaved capabilities of Google
 
 ---
 
+## 🏆 Submission Quick Links
+- **[Submission Draft & Findings](.gemini/antigravity/brain/23172d17-113f-4d6c-be67-ee0601b22fb9/submission_draft.md)**
+- **[Architecture Diagram](#architecture--the-multi-agent-system)**
+- **[Proof of GCP Deployment](deployment_guide.md)**
+
+---
+
 ## 🧠 The Core Concept: Gemini Interleaved Output
 
 The magic of this project lies in its **Creative Storyteller** approach. The core orchestration agent utilizes Gemini's native capabilities to stream a cohesive multimedia response natively. A single streaming AI broadcast loop might look like:
@@ -126,6 +133,14 @@ npm install
 npm run dev
 ```
 Navigate to [http://localhost:3000](http://localhost:3000) in your browser. You should see the dashboard successfully establish a WebSocket connection to the backend.
+
+### 3. Spin-up Verification
+To ensure the project is reproducible for judges:
+1. Ensure `.env` files are present in both `frontend` and `backend` (see examples above).
+2. Place a valid `credentials.json` in the `backend/` folder.
+3. Start Backend: `cd backend && npm run dev`
+4. Start Frontend: `cd frontend && npm run dev`
+5. Upload a sports video clip via the UI to trigger the agent pipeline.
 
 ### Next Steps: Testing the Agents
 To actually test the video analysis pipeline, you will need to place a sample sports video clip (`.mp4`) into the `backend/` directory and implement the specific Prompt chains for the agents defined above.
