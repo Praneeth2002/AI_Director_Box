@@ -45,11 +45,11 @@ To handle the immense complexity of watching video, analyzing tactics, writing c
 
 ```mermaid
 graph TD
-    subgraph Backend Orchestrator
+    subgraph BackendOrchestrator["Backend Orchestrator"]
         Storage[Video Input Buffer]
         TTS[Text-to-Speech Engine]
         
-        subgraph Multi-Agent Workspace
+        subgraph MultiAgentWorkspace["Multi-Agent Workspace"]
             Video[Live Video Feed] --> Analyst[The Analyst<br>Vision/Context]
             Analyst -->|Tactical Events| Commentator[The Commentator<br>Narrative]
             Analyst -->|Timestamps| Director[The Director<br>Multimodal Orchestrator]
@@ -58,7 +58,7 @@ graph TD
         end
     end
 
-    subgraph Viewer Dashboard (Frontend)
+    subgraph ViewerDashboard["Viewer Dashboard (Frontend)"]
         NextJS[Next.js Interactive UI]
         VideoPlayer[Live Video Player]
         StoryFeed[Live Storytelling Feed]
