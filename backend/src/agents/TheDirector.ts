@@ -98,6 +98,17 @@ export async function runDirector(
                 }));
             }
 
+            // Line 1: Climax — fire at the EXACT MOMENT of the event on the LIVE feed
+            // This prevents the 4-second gap of silence before the replay prompt
+            if (lines[1]) {
+                ws.send(JSON.stringify({
+                    type: 'commentary',
+                    data: lines[1].text,
+                    audioUrl: lines[1].audioUrl,
+                    videoTimestamp: exactEventSec
+                }));
+            }
+
             // Cut the clip
             let clipFilename: string | null = null;
             if (tactic.timestamp) {
