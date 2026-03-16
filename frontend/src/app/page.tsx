@@ -235,25 +235,25 @@ export default function Home() {
     return () => ws.current?.close();
   }, []);
 
-  // ─── Upload → immediately trigger analysis ────────────────────────────────
+  // ─── Upload → immediately Ready (no upfront analysis) ─────────────────────
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setPhase('uploading');
     setStatus(`Uploading ${file.name}...`);
     setEvents([]);
-    setAnalysedEventCount(null);
+    
     const formData = new FormData();
     formData.append('video', file);
+    
     try {
       const res = await fetch('http://localhost:9090/upload', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('Upload failed');
       const result = await res.json();
       setUploadedFileName(result.filename);
-      if (ws.current?.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({ type: 'start_analysis', filename: result.filename }));
-        setPhase('analysing');
-      }
+      // Skip analysis phase — go straight to ready for live chunking
+      setPhase('ready');
+      setStatus('Video ready. Select a persona and Generate!');
     } catch (error) {
       console.error('Error uploading video:', error);
       setStatus('Upload failed. Check backend.');
@@ -268,6 +268,13 @@ export default function Home() {
     ws.current.send(JSON.stringify({ type: 'start_pipeline', filename: uploadedFileName, persona }));
     setEvents([]);
     setPhase('broadcasting');
+
+    // Auto-start video playback exactly when the broadcast starts
+    if (mainVideoRef.current) {
+      mainVideoRef.current.currentTime = 0;
+      mainVideoRef.current.volume = 0.2;
+      mainVideoRef.current.play().catch(() => {});
+    }
   };
 
   const isConnected = status.includes('Connected') || status.includes('done') || status.includes('✅');

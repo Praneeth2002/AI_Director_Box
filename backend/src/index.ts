@@ -45,68 +45,88 @@ const upload = multer({ storage: storage });
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// In-memory cache: filename → tactical analysis results
-const tacticsCache = new Map<string, any>();
 
-async function runAnalystPhase(filename: string, videoPath: string, ws: WebSocket) {
-    ws.send(JSON.stringify({ type: 'status', data: '🔍 The Analyst is watching the video...' }));
-    try {
-        const tactics = await runAnalyst(videoPath);
-        tacticsCache.set(filename, tactics);
-        console.log(`[Pipeline] Analysis cached for ${filename}:`, JSON.stringify(tactics).slice(0, 200));
-        ws.send(JSON.stringify({ type: 'analysis_complete', filename, eventCount: tactics.length }));
-    } catch (e: any) {
-        console.error('[Pipeline] ANALYST FAILED:', e?.message || e);
-        ws.send(JSON.stringify({ type: 'status', data: `❌ Analyst error: ${e?.message || 'Unknown error'}` }));
-    }
-}
+
+import { getVideoDuration, extractChunk } from './utils/clipExtractor';
+
+// Default chunk duration is 15 seconds unless overridden in .env
+const CHUNK_DURATION_SECONDS = parseInt(process.env.CHUNK_DURATION_SECONDS || '15', 10);
 
 wss.on('connection', (ws: WebSocket) => {
     console.log('Frontend connected to AI Director orchestrator');
+
+    // To gracefully stop processing if the user disconnects or starts a new video
+    let activeStreamId: string | null = null;
 
     ws.on('message', async (message) => {
         try {
             const parsed = JSON.parse(message.toString());
             console.log('received JSON command:', parsed.type);
 
-            // Phase 1: triggered immediately on upload — run TheAnalyst only
-            if (parsed.type === 'start_analysis' && parsed.filename) {
-                const videoPath = path.join(uploadDir, parsed.filename);
-                runAnalystPhase(parsed.filename, videoPath, ws); // fire-and-forget
-                return;
-            }
-
-            // Phase 2: triggered when user picks persona and clicks "Generate Commentary"
-            // Skips TheAnalyst — uses cached tactics
+            // Phase 1: start_pipeline (triggered when user picks persona and clicks "Generate")
+            // This now handles both analysis and commentary in real-time chunks
             if (parsed.type === 'start_pipeline' && parsed.filename) {
-                const tactics = tacticsCache.get(parsed.filename);
-
-                if (!tactics) {
-                    ws.send(JSON.stringify({ type: 'status', data: '⚠️ Analysis not ready yet, please wait...' }));
-                    return;
-                }
+                const streamId = Math.random().toString(36).substring(7);
+                activeStreamId = streamId;
 
                 const videoPath = path.join(uploadDir, parsed.filename);
-                let script: any = [];
+                const persona = parsed.persona || 'excited_narrator';
 
-                // Step 2: Commentator
                 try {
-                    ws.send(JSON.stringify({ type: 'status', data: `🎙️ Writing script as ${parsed.persona || 'excited_narrator'}...` }));
-                    script = await runCommentator(tactics, parsed.persona);
-                    console.log('[Pipeline] Commentator complete:', JSON.stringify(script).slice(0, 200));
-                } catch (e: any) {
-                    console.error('[Pipeline] COMMENTATOR FAILED:', e?.message || e);
-                    ws.send(JSON.stringify({ type: 'status', data: `❌ Commentator error: ${e?.message || 'Unknown error'}` }));
-                    return;
-                }
+                    // 1. Get total duration
+                    ws.send(JSON.stringify({ type: 'status', data: '🎬 Measuring video length...' }));
+                    const durationSec = await getVideoDuration(videoPath);
+                    console.log(`[Pipeline] Video duration: ${durationSec}s. Chunks: ~${Math.ceil(durationSec / CHUNK_DURATION_SECONDS)}`);
 
-                // Step 3: Director — streams output line by line to the client
-                try {
-                    ws.send(JSON.stringify({ type: 'status', data: '🎬 The Director is taking control...' }));
-                    await runDirector(videoPath, tactics, script, ws);
+                    ws.send(JSON.stringify({ type: 'status', data: '🔴 LIVE BROADCASING STARTED' }));
+
+                    let currentStartSec = 0;
+                    let chunkIndex = 0;
+
+                    // 2. Loop through the video in chunks
+                    while (currentStartSec < durationSec && activeStreamId === streamId) {
+                        const remaining = durationSec - currentStartSec;
+                        const chunkDuration = Math.min(CHUNK_DURATION_SECONDS, remaining);
+
+                        console.log(`\n======================================================`);
+                        console.log(`🎬 STARTING CHUNK ${chunkIndex} (${currentStartSec}s to ${currentStartSec + chunkDuration}s)`);
+                        console.log(`======================================================\n`);
+
+                        // Extract the chunk
+                        const chunkFilename = await extractChunk(videoPath, clipsDir, currentStartSec, chunkDuration, chunkIndex);
+                        const chunkPath = path.join(clipsDir, chunkFilename);
+
+                        // Step 1: The Analyst (detects tactics in this chunk)
+                        const tactics = await runAnalyst(chunkPath);
+                        console.log(`[Pipeline] Chunk ${chunkIndex} analysis complete. Events: ${tactics.length}`);
+
+                        if (tactics.length > 0) {
+                            // Step 2: The Commentator (writes script for this chunk)
+                            const script = await runCommentator(tactics, persona);
+                            console.log(`[Pipeline] Chunk ${chunkIndex} script generated.`);
+
+                            // Step 3: The Director (streams the timeline, offset by currentStartSec)
+                            await runDirector(videoPath, tactics, script, ws, currentStartSec);
+                        }
+
+                        // Cleanup the temporary chunk file to save space
+                        fs.unlink(chunkPath, (err) => {
+                            if (err) console.error(`[Cleanup] Failed to delete chunk ${chunkFilename}:`, err.message);
+                        });
+
+                        // Move to next chunk
+                        currentStartSec += chunkDuration;
+                        chunkIndex++;
+                    }
+
+                    if (activeStreamId === streamId) {
+                        ws.send(JSON.stringify({ type: 'status', data: '✅ Broadcast Complete' }));
+                        console.log('[Pipeline] Finished all chunks.');
+                    }
+
                 } catch (e: any) {
-                    console.error('[Pipeline] DIRECTOR FAILED:', e?.message || e);
-                    ws.send(JSON.stringify({ type: 'status', data: `❌ Director error: ${e?.message || 'Unknown error'}` }));
+                    console.error('[Pipeline] PIPELINE FAILED:', e?.message || e);
+                    ws.send(JSON.stringify({ type: 'status', data: `❌ Error: ${e?.message || 'Unknown error'}` }));
                 }
             }
         } catch (e) {

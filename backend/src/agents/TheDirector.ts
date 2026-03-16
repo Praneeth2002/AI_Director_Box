@@ -17,9 +17,10 @@ export async function runDirector(
     videoFilePath: string,
     tacticalData: any[],
     commentaryScript: any[],
-    ws: WebSocket
+    ws: WebSocket,
+    chunkStartTimeSec: number = 0 // Offset for chunked real-time processing
 ) {
-    console.log(`[The Director] Building timestamp-synced broadcast timeline...`);
+    console.log(`[The Director] Building timestamp-synced broadcast timeline (Offset: ${chunkStartTimeSec}s)...`);
 
     try {
         // ── Match each commentary item to its tactical event ────────────────
@@ -40,8 +41,9 @@ export async function runDirector(
 
             if (!tactic) continue;
 
-            const startSec = getStartSec(tactic.timestamp ?? '0:00');
-            timeline.push({ tactic, commentary: item, startSec });
+            const localStartSec = getStartSec(tactic.timestamp ?? '0:00');
+            const globalStartSec = localStartSec + chunkStartTimeSec;
+            timeline.push({ tactic, commentary: item, startSec: globalStartSec });
         }
 
         // Sort strictly by video timestamp

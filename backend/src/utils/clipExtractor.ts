@@ -19,8 +19,27 @@ const ffmpegBin = resolveFfmpegPath();
 if (ffmpegBin) {
     console.log(`[Clip] Using ffmpeg at: ${ffmpegBin}`);
     ffmpeg.setFfmpegPath(ffmpegBin);
+    // Use ffprobe from the same bin directory if available
+    const ffprobeBin = path.join(path.dirname(ffmpegBin), 'ffprobe.exe');
+    if (fs.existsSync(ffprobeBin)) {
+        ffmpeg.setFfprobePath(ffprobeBin);
+    }
 } else {
     console.log('[Clip] ffmpeg not found at winget location, relying on system PATH');
+}
+
+// Get the total duration of a video file in seconds
+export function getVideoDuration(videoPath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(videoPath, (err, metadata) => {
+            if (err) {
+                console.error('[Clip] ffprobe error:', err.message);
+                return reject(err);
+            }
+            const duration = metadata.format.duration;
+            resolve(duration ? parseFloat(duration.toString()) : 0);
+        });
+    });
 }
 
 // Parse "MM:SS-MM:SS" or "HH:MM:SS-HH:MM:SS" into start seconds + duration with ±1s buffer
@@ -78,6 +97,39 @@ export function cutClip(
             })
             .on('error', (err) => {
                 console.error('[Clip] ❌ ffmpeg error:', err.message);
+                reject(err);
+            })
+            .run();
+    });
+}
+
+// Extract a specific time chunk from the video. Returns the saved filename.
+// Uses -c copy (stream copy, no re-encode) for near-instant extraction.
+export function extractChunk(
+    videoPath: string,
+    chunksDir: string,
+    startTime: number,
+    duration: number,
+    chunkIndex: number
+): Promise<string> {
+    return new Promise((resolve, reject) => {
+        if (!fs.existsSync(chunksDir)) fs.mkdirSync(chunksDir, { recursive: true });
+
+        const filename = `chunk_${chunkIndex}_${startTime}s.mp4`;
+        const outputPath = path.join(chunksDir, filename);
+
+        console.log(`[Chunk] Extracting ${duration}s from ${startTime}s → ${filename}`);
+
+        ffmpeg(videoPath)
+            .setStartTime(startTime)
+            .setDuration(duration)
+            .outputOptions('-c copy')
+            .output(outputPath)
+            .on('end', () => {
+                resolve(filename);
+            })
+            .on('error', (err) => {
+                console.error(`[Chunk ${chunkIndex}] ❌ ffmpeg error:`, err.message);
                 reject(err);
             })
             .run();

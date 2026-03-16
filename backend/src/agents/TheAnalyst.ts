@@ -29,9 +29,9 @@ export async function runAnalyst(videoFilePath: string) {
         const fileSizeMB = (videoBytes.length / (1024 * 1024)).toFixed(2);
         console.log(`[The Analyst] Video loaded (${fileSizeMB} MB). Sending to Gemini Vision...`);
 
-        const prompt = `You are an expert football broadcast analyst. Watch this entire video clip carefully.
+        const prompt = `You are an expert football broadcast analyst. Watch this short video chunk which is a segment of a larger live match.
 
-Output a strict JSON array covering EVERY significant moment — both tactical AND atmosphere/broadcast moments.
+Output a strict JSON array covering EVERY significant moment in this chunk — both tactical AND atmosphere/broadcast moments.
 
 Event categories to detect and include:
 - TACTICAL: goals, shots, saves, tackles, fouls, corners, through balls, pressing, formations
