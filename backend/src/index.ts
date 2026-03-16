@@ -10,6 +10,7 @@ import path from 'path';
 import { runAnalyst } from './agents/TheAnalyst';
 import { runCommentator } from './agents/TheCommentator';
 import { runDirector } from './agents/TheDirector';
+import { runStoryteller } from './agents/TheStoryteller';
 
 dotenv.config();
 
@@ -26,10 +27,13 @@ app.use(express.json());
 // Setup storage for video uploads
 const uploadDir = path.join(__dirname, '../uploads');
 const clipsDir = path.join(__dirname, '../uploads/clips');
+const audioDir = path.join(__dirname, '../uploads/audio');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(clipsDir)) fs.mkdirSync(clipsDir, { recursive: true });
+if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
 app.use('/uploads', express.static(uploadDir));
 app.use('/clips', express.static(clipsDir));
+app.use('/audio', express.static(audioDir));
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -152,8 +156,13 @@ wss.on('connection', (ws: WebSocket) => {
                     }
 
                     if (activeStreamId === streamId) {
-                        ws.send(JSON.stringify({ type: 'status', data: '✅ Broadcast Complete' }));
-                        console.log('[Pipeline] Finished all chunks.');
+                        ws.send(JSON.stringify({ type: 'status', data: '✅ Broadcast Complete. Compiling Storybook...' }));
+                        console.log('[Pipeline] Finished all chunks. Generating Storybook...');
+                        
+                        const storybook = await runStoryteller(pastContext);
+                        if (storybook) {
+                            ws.send(JSON.stringify({ type: 'storybook', data: storybook }));
+                        }
                     }
 
                 } catch (e: any) {

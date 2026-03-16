@@ -1,25 +1,24 @@
 # The AI Director's Box 🎬⚽
 
-**The AI Director's Box** is an experimental, fully autonomous AI-powered broadcast production suite. Instead of just generating passive text commentary, this system acts as a real-time commentator, analyst, and creative director for live sports.
+**The AI Director's Box** is an experimental, fully autonomous AI-powered broadcast production suite built for the **Gemini API "Creative Storyteller" Competition**. Instead of just generating passive text, this system acts as a real-time commentator, analyst, and creative director for live sports.
 
-It leverages the native multimodal and interleaved capabilities of Google's Gemini models to watch a video feed and weave together a rich, mixed-media "Match Story" containing:
-- Spoken, persona-driven audio commentary.
-- Real-time tactical text analysis.
-- Dynamic data overlays and diagrams (Player Focus Cards, Tactical Pitch Maps).
-- Highlight video clips.
-- Ready-to-publish social media threads.
+It deeply leverages the native multimodal and interleaved capabilities of Google's Gemini models to watch a video feed and weave together a rich, mixed-media "Match Story" containing:
+- **Spoken, persona-driven audio commentary** generated dynamically via Google Cloud Text-to-Speech (Journey voices).
+- **AI-Generated Tactical Visuals** dynamically rendered over the video as Mermaid.js SVG overlays.
+- **Interactive Match Storybooks** featuring a comprehensive post-match newspaper recap drafted by Gemini 2.5 Flash and a photo-realistic illustration generated entirely by **Vertex AI Imagen 3**.
+- Highlight video clips and sentiment-driven content.
 
 ---
 
 ## 🧠 The Core Concept: Gemini Interleaved Output
 
-The magic of this project lies in its **Creative Storyteller** approach. The system does not just return JSON or plain text. The core orchestration agent utilizes Gemini's native interleaved output to stream a cohesive multimedia response. A single streaming response might look like:
+The magic of this project lies in its **Creative Storyteller** approach. The core orchestration agent utilizes Gemini's native capabilities to stream a cohesive multimedia response natively. A single streaming AI broadcast loop might look like:
 
 > *"What a blistering counter-attack by the blues! Look at the space opening up on the right flank."*
-> `[Directive: Render Tactical Diagram for Right-Wing Overload]`
+> `[Directive: Render Tactical Diagram for Right-Wing Overload via Mermaid.js]`
 > *"He chips it over the keeper... and IT'S IN! Absolute scenes!"*
 > `[Directive: Clip Video Highlight 12:04-12:15]`
-> `[Directive: Trigger Audio Tone <excited>]`
+> `[Directive: Compile Match Recap and trigger Imagen 3 generation]`
 
 ---
 

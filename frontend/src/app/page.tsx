@@ -1,14 +1,22 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import mermaid from 'mermaid';
 
 type StoryEvent = {
   type: 'status' | 'commentary' | 'visual' | 'video_clip' | 'play_video';
   data: string;
   clipUrl?: string;
+  mermaid?: string; // Added mermaid property to StoryEvent
 };
 
-type AppPhase = 'idle' | 'uploading' | 'analysing' | 'ready' | 'broadcasting';
+type StorybookAsset = {
+  title: string;
+  narrative: string;
+  imageUrl?: string;
+};
+
+type AppPhase = 'idle' | 'uploading' | 'analysing' | 'ready' | 'broadcasting' | 'storybook';
 type ReplayPhase = 'intro' | 'playing' | 'outro' | null;
 
 // Map clip title keywords → emoji label shown on the intro card
@@ -23,6 +31,41 @@ function eventLabel(title: string): { emoji: string; label: string } {
   return { emoji: '📺', label: 'REPLAY' };
 }
 
+// --- Mermaid React Component ---
+function MermaidRenderer({ diagram }: { diagram: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [svgStr, setSvgStr] = useState<string>('');
+  
+  useEffect(() => {
+    if (!diagram || !containerRef.current) return;
+    const render = async () => {
+      try {
+        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+        // mermaid.render returns { svg, bindFunctions } in modern versions
+        const { svg } = await mermaid.render(id, diagram);
+        setSvgStr(svg);
+      } catch (err) {
+        console.error('Mermaid rendering failed', err);
+      }
+    };
+    render();
+  }, [diagram]);
+
+  return (
+    <div className="absolute top-4 right-4 z-40 bg-black/80 p-4 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md animate-in slide-in-from-right-8 duration-500 max-w-[40%]">
+      <div className="text-xs font-bold uppercase tracking-widest text-indigo-400 mb-2 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+        AI Tactical Analysis
+      </div>
+      <div 
+        ref={containerRef} 
+        className="mermaid-wrapper [&>svg]:max-w-full [&>svg]:h-auto"
+        dangerouslySetInnerHTML={{ __html: svgStr }} 
+      />
+    </div>
+  );
+}
+
 export default function Home() {
   const [phase, setPhase] = useState<AppPhase>('idle');
   const [events, setEvents] = useState<StoryEvent[]>([]);
@@ -30,14 +73,13 @@ export default function Home() {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [persona, setPersona] = useState('excited_narrator');
   const [analysedEventCount, setAnalysedEventCount] = useState<number | null>(null);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
 
   // Replay state — 3 phases: intro → playing → outro
   const [replayEnabled, setReplayEnabled] = useState(true);
   const [replayPhase, setReplayPhase] = useState<ReplayPhase>(null);
   const [replayUrl, setReplayUrl] = useState<string | null>(null);
   const [replayTitle, setReplayTitle] = useState<string>('');
+  const [storybook, setStorybook] = useState<StorybookAsset | null>(null);
   const savedVideoTimeRef = useRef<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -45,66 +87,74 @@ export default function Home() {
   const replayVideoRef = useRef<HTMLVideoElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const ws = useRef<WebSocket | null>(null);
+  const [activeMermaid, setActiveMermaid] = useState<string | null>(null);
 
-  // TTS queue — items accumulate here; processed one at a time
-  const ttsQueue = useRef<Array<{ text: string; tone: string }>>([]);
+  // Initialize Mermaid configuration
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      securityLevel: 'loose',
+    });
+  }, []);
+
+  // Audio Queue State
+  const ttsQueue = useRef<{ text: string, audioUrl: string | null, mermaid?: string }[]>([]);
   const isSpeaking = useRef(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   // Refs that mirror state — needed so stale WS closure always sees the latest value
   const replayPhaseRef = useRef<ReplayPhase>(null);
   const replayEnabledRef = useRef(true);
   // Timestamp queue — items fire when video.currentTime crosses their targetTime
-  const timestampQueue = useRef<Array<{ text: string; tone: string; targetTime: number; originalEvent?: StoryEvent }>>([]);
-  // Ref for selected voice — keeps processQueue's closure in sync without re-registering
-  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const timestampQueue = useRef<Array<{ text: string; audioUrl: string | null; targetTime: number; originalEvent?: StoryEvent }>>([]);
+  // Removed selectedVoiceRef
 
-  // Load available voices (fires async on first call, then via onvoiceschanged)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const load = () => {
-      const list = window.speechSynthesis.getVoices();
-      if (list.length === 0) return;
-      setVoices(list);
-      // Default: first English voice, or just the first one
-      const def = list.find(v => v.lang.startsWith('en')) ?? list[0];
-      setSelectedVoiceName(def.name);
-      selectedVoiceRef.current = def;
-    };
-    load();
-    window.speechSynthesis.onvoiceschanged = load;
-  }, []);
+  // Removed useEffect for loading voices
 
-  // ─── TTS Queue ──────────────────────────────────────────────────────────
-  // Processes one utterance at a time. Commentary plays continuously through replays.
+  // ─── Audio File Playback Queue ─────────────────────────────────────────────
+  // Plays the Google Cloud TTS MP3 files sequentially
   const processQueue = () => {
-    if (isSpeaking.current) return;  // already speaking, onend will chain
+    if (isSpeaking.current) return;
     const next = ttsQueue.current.shift();
     if (!next) return;
 
-    isSpeaking.current = true;
-    const u = new SpeechSynthesisUtterance(next.text);
-    if (selectedVoiceRef.current) u.voice = selectedVoiceRef.current;
-    switch (next.tone) {
-      case 'excited': u.rate = 1.45; u.pitch = 1.6; u.volume = 1.0; break;
-      case 'anticipation': u.rate = 0.95; u.pitch = 1.2; u.volume = 0.95; break;
-      case 'analytical': u.rate = 0.85; u.pitch = 0.85; u.volume = 0.8; break;
-      case 'disappointed': u.rate = 0.8; u.pitch = 0.75; u.volume = 0.75; break;
-      case 'funny': u.rate = 1.2; u.pitch = 1.4; u.volume = 1.0; break;
-      default: u.rate = 0.9; u.pitch = 0.95; u.volume = 0.85;
+    if (!next.audioUrl) {
+      // If no audio URL (e.g. error generation), just skip and process next
+      processQueue();
+      return;
     }
-    u.onend = () => { isSpeaking.current = false; processQueue(); };
-    u.onerror = () => { isSpeaking.current = false; processQueue(); };
-    window.speechSynthesis.speak(u);
+
+    isSpeaking.current = true;
+    const audio = new Audio(`http://localhost:9090${next.audioUrl}`);
+    currentAudioRef.current = audio;
+
+    audio.onended = () => {
+      isSpeaking.current = false;
+      currentAudioRef.current = null;
+      processQueue();
+    };
+
+    audio.onerror = () => {
+      console.error('Audio playback failed for', next.audioUrl);
+      isSpeaking.current = false;
+      currentAudioRef.current = null;
+      processQueue();
+    };
+
+    audio.play().catch(e => {
+      console.error('Audio play blocked:', e);
+      isSpeaking.current = false;
+      currentAudioRef.current = null;
+      processQueue();
+    });
   };
 
-  const speakCommentary = (rawText: string, videoTimestamp?: number, originalEvent?: StoryEvent) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    const toneMatch = rawText.match(/<tone:([^>]+)>/i);
-    const tone = toneMatch ? toneMatch[1].toLowerCase() : 'calm';
+  const speakCommentary = (rawText: string, audioUrl?: string | null, videoTimestamp?: number, originalEvent?: StoryEvent) => {
     const text = rawText.replace(/<tone:[^>]+>/gi, '').trim();
 
     if (videoTimestamp !== undefined) {
       // Schedule for when the video crosses this timestamp
-      timestampQueue.current.push({ text, tone, targetTime: videoTimestamp, originalEvent });
+      timestampQueue.current.push({ text, audioUrl: audioUrl || null, targetTime: videoTimestamp, originalEvent });
       timestampQueue.current.sort((a, b) => a.targetTime - b.targetTime);
     } else {
       // No timestamp — queue immediately
@@ -115,12 +165,12 @@ export default function Home() {
           return updated;
         });
       }
-      ttsQueue.current.push({ text, tone });
+      ttsQueue.current.push({ text, audioUrl: audioUrl || null });
       processQueue();
     }
   };
 
-  // ─── Video time update — fires TTS when video crosses an event's timestamp ──
+  // ─── Video time update — fires Audio when video crosses an event's timestamp ──
   const handleVideoTimeUpdate = () => {
     if (!mainVideoRef.current || timestampQueue.current.length === 0) return;
     const now = mainVideoRef.current.currentTime;
@@ -144,8 +194,14 @@ export default function Home() {
         if (replayEnabledRef.current && replayPhaseRef.current === null) {
           startReplay(clipUrl, title ?? '');
         }
+      } else if (item.text.startsWith('__MERMAID__')) {
+        const payload = item.text.replace('__MERMAID__', '');
+        setActiveMermaid(payload);
+        // Auto-hide the diagram after 7 seconds
+        setTimeout(() => setActiveMermaid(null), 7000);
       } else {
-        ttsQueue.current.push({ text: item.text, tone: item.tone });
+        // Here `audioUrl` is directly available from the item
+        ttsQueue.current.push({ text: item.text, audioUrl: item.audioUrl || null });
       }
     }
     processQueue();
@@ -196,7 +252,12 @@ export default function Home() {
 
     ws.current.onmessage = (event) => {
       try {
-        const payload = JSON.parse(event.data) as StoryEvent & { filename?: string; eventCount?: number };
+        const payload = JSON.parse(event.data) as StoryEvent & { 
+          filename?: string; 
+          eventCount?: number; 
+          videoTimestamp?: number;
+          audioUrl?: string; 
+        };
 
         if (payload.type === 'status') {
           setStatus(payload.data);
@@ -215,6 +276,12 @@ export default function Home() {
           return;
         }
 
+        if ((payload as any).type === 'storybook') {
+          setStorybook((payload as any).data);
+          setPhase('storybook');
+          return;
+        }
+
         if (payload.type === 'play_video') {
           if (mainVideoRef.current?.paused) {
             mainVideoRef.current.currentTime = 0;
@@ -225,25 +292,29 @@ export default function Home() {
         }
 
         if (payload.type === 'commentary') {
-          speakCommentary(payload.data, (payload as any).videoTimestamp, payload);
+          speakCommentary(payload.data, payload.audioUrl, payload.videoTimestamp, payload);
           return;
         }
-        
+
         if (payload.type === 'visual') {
-           // Queue visuals just like commentary
-           timestampQueue.current.push({ text: '', tone: '', targetTime: (payload as any).videoTimestamp || 0, originalEvent: payload });
+           if (payload.mermaid) {
+             timestampQueue.current.push({ text: `__MERMAID__${payload.mermaid}`, audioUrl: null, targetTime: payload.videoTimestamp || 0, originalEvent: payload });
+           } else {
+             // Queue visuals just like commentary
+             timestampQueue.current.push({ text: '', audioUrl: null, targetTime: payload.videoTimestamp || 0, originalEvent: payload });
+           }
            timestampQueue.current.sort((a, b) => a.targetTime - b.targetTime);
            return;
         }
 
         if (payload.type === 'video_clip') {
           if (replayEnabledRef.current && replayPhaseRef.current === null && payload.clipUrl) {
-            const fireAt: number | undefined = (payload as any).videoTimestamp;
+            const fireAt: number | undefined = payload.videoTimestamp;
             if (fireAt !== undefined) {
               // Schedule replay via timestamp queue AND buffer for UI
               timestampQueue.current.push({
                 text: `__REPLAY__${payload.clipUrl}||${payload.data}`,
-                tone: '',
+                audioUrl: null, // Replays don't have audioUrl here
                 targetTime: fireAt,
                 originalEvent: payload
               });
@@ -273,10 +344,10 @@ export default function Home() {
     setPhase('uploading');
     setStatus(`Uploading ${file.name}...`);
     setEvents([]);
-    
+
     const formData = new FormData();
     formData.append('video', file);
-    
+
     try {
       const res = await fetch('http://localhost:9090/upload', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('Upload failed');
@@ -299,7 +370,7 @@ export default function Home() {
     ws.current.send(JSON.stringify({ type: 'start_pipeline', filename: uploadedFileName, persona }));
     setEvents([]);
     setPhase('broadcasting');
-    
+
     // Video will auto-start (from t=0) exactly when the first piece of commentary arrives over WebSocket
   };
 
@@ -425,6 +496,10 @@ export default function Home() {
                 )}
               </div>
             )}
+          {/* ── LIVE TACTICAL MERMAID OVERLAY ── */}
+          {activeMermaid && !replayPhase && (
+             <MermaidRenderer diagram={activeMermaid} />
+          )}
           </div>
 
           {/* Director Controls */}
@@ -467,26 +542,6 @@ export default function Home() {
                   <option value="comedian_fan">🤪 Die-hard Fan</option>
                   <option value="brazilian_narrator">🇧🇷 Brazilian Narrator</option>
                 </select>
-
-                {/* 3 — Voice */}
-                {voices.length > 0 && (
-                  <select
-                    value={selectedVoiceName}
-                    onChange={(e) => {
-                      const v = voices.find(v => v.name === e.target.value) ?? null;
-                      selectedVoiceRef.current = v;
-                      setSelectedVoiceName(e.target.value);
-                    }}
-                    className="h-10 px-3 bg-neutral-900 border border-white/10 rounded-lg text-sm font-medium text-neutral-300 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer max-w-[180px] truncate"
-                    title="English voices only"
-                  >
-                    {voices.filter(v => v.lang.startsWith('en')).map(v => (
-                      <option key={v.name} value={v.name}>🎙️ {v.name.replace('Microsoft ', '')}</option>
-                    ))}
-                  </select>
-                )}
-
-                {/* 4 — Generate */}
                 <button
                   onClick={handleGenerateCommentary}
                   disabled={phase === 'broadcasting'}
@@ -509,7 +564,6 @@ export default function Home() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14v-4z" /><rect x="3" y="6" width="12" height="12" rx="2" ry="2" /></svg>
                   {replayEnabled ? '📺 Replay ON' : '📺 Replay OFF'}
                 </button>
-
               </>)}
             </div>
           </div>
@@ -568,6 +622,58 @@ export default function Home() {
           <div className="absolute bottom-0 inset-x-0 h-24 bg-gradient-to-t from-neutral-900/90 to-transparent pointer-events-none"></div>
         </section>
       </div>
+
+      {/* ── AI Storybook Overlay ── */}
+      {phase === 'storybook' && storybook && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-12 animate-in fade-in zoom-in-95 duration-700">
+          <div className="absolute inset-0 bg-neutral-950/90 backdrop-blur-xl" />
+          <div className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto bg-neutral-900 ring-1 ring-white/10 rounded-3xl shadow-2xl flex flex-col md:flex-row">
+            
+            {/* Storybook Image */}
+            <div className="md:w-5/12 relative aspect-square md:aspect-auto bg-black shrink-0">
+              {storybook.imageUrl ? (
+                <img src={storybook.imageUrl} alt="AI Generated Illustration" className="absolute inset-0 w-full h-full object-cover" />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-900 border-r border-white/5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-700 mb-4"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  <p className="text-neutral-500 font-mono text-xs text-center px-8">Enable Vertex AI Imagen API to see AI illustrations here.</p>
+                </div>
+              )}
+              {/* Gradient fade to text */}
+              <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-l from-neutral-900 to-transparent pointer-events-none" />
+            </div>
+
+            {/* Storybook Text */}
+            <div className="relative flex-1 p-8 md:p-12 lg:p-16 flex flex-col justify-center">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="px-3 py-1 bg-indigo-500/20 text-indigo-400 rounded-full text-xs font-bold uppercase tracking-widest ring-1 ring-indigo-500/30">
+                  Post-Match Recap
+                </div>
+                <div className="text-xs font-mono text-neutral-500 bg-neutral-800 px-2 py-1 rounded">
+                  Generated by Gemini 2.5 Flash
+                </div>
+              </div>
+              
+              <h1 className="text-3xl md:text-5xl font-black text-white leading-tight mb-8 tracking-tight">
+                {storybook.title}
+              </h1>
+              
+              <div 
+                className="prose prose-invert prose-indigo prose-p:text-neutral-300 prose-p:leading-relaxed max-w-none text-lg"
+                dangerouslySetInnerHTML={{ __html: storybook.narrative }}
+              />
+
+              <div className="mt-12 pt-8 border-t border-white/10 flex gap-4">
+                <button onClick={() => setPhase('idle')} className="h-12 px-6 bg-white text-black font-semibold rounded-xl hover:bg-neutral-200 transition-colors">
+                  Analyze Another Match
+                </button>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }

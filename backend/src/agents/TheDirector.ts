@@ -57,10 +57,10 @@ export async function runDirector(
         for (const entry of timeline) {
             const { tactic, commentary, exactEventSec, chunkStartSec } = entry;
 
-            // Support both old format (text) and new format (lines[])
-            const lines: string[] = Array.isArray(commentary.lines)
+            // Support both old format (text) and new format (lines array of objects)
+            const lines = Array.isArray(commentary.lines)
                 ? commentary.lines
-                : (commentary.text ? [commentary.text] : []);
+                : (commentary.text ? [{ text: commentary.text }] : []);
 
             const isHigh = commentary.importance === 'high' ||
                 /goal|save|block|shot|strike|penalty/i.test(tactic.event ?? '');
@@ -70,7 +70,8 @@ export async function runDirector(
                 if (lines[0]) {
                     ws.send(JSON.stringify({
                         type: 'commentary',
-                        data: lines[0],
+                        data: lines[0].text,
+                        audioUrl: lines[0].audioUrl,
                         // Fire general commentary immediately at chunk start to prevent dead air
                         videoTimestamp: chunkStartSec 
                     }));
@@ -78,6 +79,7 @@ export async function runDirector(
                 ws.send(JSON.stringify({
                     type: 'visual',
                     data: `Tracking: ${tactic.event}`,
+                    mermaid: tactic.mermaid_diagram,
                     videoTimestamp: exactEventSec
                 }));
                 await new Promise(r => setTimeout(r, 1500));
@@ -90,7 +92,8 @@ export async function runDirector(
             if (lines[0]) {
                 ws.send(JSON.stringify({
                     type: 'commentary',
-                    data: lines[0],
+                    data: lines[0].text,
+                    audioUrl: lines[0].audioUrl,
                     videoTimestamp: chunkStartSec
                 }));
             }
@@ -117,7 +120,8 @@ export async function runDirector(
             if (lines[1]) {
                 ws.send(JSON.stringify({
                     type: 'commentary',
-                    data: lines[1],
+                    data: lines[1].text,
+                    audioUrl: lines[1].audioUrl,
                     videoTimestamp: exactEventSec + 2
                 }));
             }
@@ -126,7 +130,8 @@ export async function runDirector(
             if (lines[2]) {
                 ws.send(JSON.stringify({
                     type: 'commentary',
-                    data: lines[2],
+                    data: lines[2].text,
+                    audioUrl: lines[2].audioUrl,
                     videoTimestamp: exactEventSec + 5
                 }));
             }

@@ -48,6 +48,7 @@ Each object MUST have exactly these properties:
 1. "timestamp": string — start-end time (e.g., "0:00:02-0:00:05")
 2. "event": string — short descriptive title (e.g., "Penalty Goal", "Crowd Celebration")
 3. "tactics": string — 1-2 sentences describing what is visually happening and why it matters
+4. "mermaid_diagram": string (OPTIONAL) — If this is a highly tactical event (like a goal buildup, a formation shift, or a shot on target), provide a valid Mermaid.js syntax string representing the play. Use a "graph TD" or "sequenceDiagram". For example, showing Player A passing to Player B who shoots. Omit this field if it's just crowd atmosphere.
 
 CRITICAL: Do NOT skip the end of the video. If fans are celebrating or players are reacting after a goal, that is a separate event with its own timestamp.
 If nothing significant happens in a segment, describe the general run of play.`;
