@@ -17,7 +17,11 @@ async function run() {
             }
         });
         console.log("Success! Image generated.");
-        console.dir(Object.keys(response.generatedImages[0].image));
+        if (response.generatedImages && response.generatedImages.length > 0) {
+            console.dir(Object.keys(response.generatedImages[0].image));
+        } else {
+            console.log("No images were returned in the response.");
+        }
     } catch (e) {
         console.error("Failed:", e);
     }

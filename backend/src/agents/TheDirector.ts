@@ -108,33 +108,18 @@ export async function runDirector(
                 }
             }
 
-            // VIDEO_CLIP fires at exact event time — triggers the replay on frontend
+            // VIDEO_CLIP now fires 4s after exact event time — to ask the user "Want to see a replay?"
+            // It bundles the climax (Line 1) and reaction (Line 2) to be played DURING the replay.
             ws.send(JSON.stringify({
                 type: 'video_clip',
                 data: `Highlight: ${tactic.event}`,
                 clipUrl: clipFilename ? `/clips/${clipFilename}` : undefined,
-                videoTimestamp: exactEventSec
+                videoTimestamp: exactEventSec + 4,
+                replayCommentary: {
+                    climax: lines[1] ? { text: lines[1].text, audioUrl: lines[1].audioUrl, delay: 2 } : undefined,
+                    reaction: lines[2] ? { text: lines[2].text, audioUrl: lines[2].audioUrl, delay: 5 } : undefined
+                }
             }));
-
-            // Line 1 (climax) fires 2s into replay
-            if (lines[1]) {
-                ws.send(JSON.stringify({
-                    type: 'commentary',
-                    data: lines[1].text,
-                    audioUrl: lines[1].audioUrl,
-                    videoTimestamp: exactEventSec + 2
-                }));
-            }
-
-            // Line 2 (reaction) fires 5s into replay
-            if (lines[2]) {
-                ws.send(JSON.stringify({
-                    type: 'commentary',
-                    data: lines[2].text,
-                    audioUrl: lines[2].audioUrl,
-                    videoTimestamp: exactEventSec + 5
-                }));
-            }
 
             // Small gap before next event
             await new Promise(r => setTimeout(r, 1000));

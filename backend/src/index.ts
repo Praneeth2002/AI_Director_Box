@@ -170,6 +170,13 @@ wss.on('connection', (ws: WebSocket) => {
                     ws.send(JSON.stringify({ type: 'status', data: `❌ Error: ${e?.message || 'Unknown error'}` }));
                 }
             }
+
+            // Phase 2: stop_pipeline (Kill switch)
+            if (parsed.type === 'stop_pipeline') {
+                console.log('[Pipeline] 🛑 KILL SWITCH TRIGGERED. Stopping all streams...');
+                activeStreamId = null;
+                ws.send(JSON.stringify({ type: 'status', data: '⏹️ Broadcast Stopped by User' }));
+            }
         } catch (e) {
             console.log('received plain string:', message.toString());
         }

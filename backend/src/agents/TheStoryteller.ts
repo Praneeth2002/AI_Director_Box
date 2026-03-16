@@ -34,7 +34,7 @@ Match Log:
 ${matchHistory}
 
 Return a strict JSON object with these properties:
-1. "title": A catchy, newspaper-style headline for the match.
+1. "title": A catchy, emotional, newspaper-style headline for the match (e.g., "THE MIRACLE IN MADRID", "HEARTBREAK AT THE DEATH").
 2. "narrative": The 3-paragraph story. Use HTML <p> tags for paragraphs.
 3. "imagePrompt": A highly detailed prompt for an AI image generator (Imagen) to create a dramatic illustration of the defining moment of this match. (e.g. "A dramatic, cinematic wide shot of a football stadium exploding in celebration as a player in green scores a volley, dramatic lighting, high quality")`;
 
