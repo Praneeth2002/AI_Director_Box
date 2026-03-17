@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import path from 'path';
 import { cutClip } from '../utils/clipExtractor';
+import { uploadToGCS, getServeUrl } from '../utils/gcsStorage';
 
 const clipsDir = path.join(__dirname, '../../uploads/clips');
 
@@ -17,16 +18,18 @@ export async function runDirector(
     videoFilePath: string,
     tacticalData: any[],
     commentaryScript: any[],
-    ws: WebSocket
+    ws: WebSocket,
+    chunkStartTimeSec: number = 0 // Offset for chunked real-time processing
 ) {
-    console.log(`[The Director] Building timestamp-synced broadcast timeline...`);
+    console.log(`[The Director] Building timestamp-synced broadcast timeline (Offset: ${chunkStartTimeSec}s)...`);
 
     try {
         // ── Match each commentary item to its tactical event ────────────────
         type TimelineEntry = {
             tactic: any;
             commentary: any;
-            startSec: number;
+            exactEventSec: number;
+            chunkStartSec: number; // Keep track of the chunk boundary to start speaking early
         };
 
         const timeline: TimelineEntry[] = [];
@@ -40,24 +43,25 @@ export async function runDirector(
 
             if (!tactic) continue;
 
-            const startSec = getStartSec(tactic.timestamp ?? '0:00');
-            timeline.push({ tactic, commentary: item, startSec });
+            const localStartSec = getStartSec(tactic.timestamp ?? '0:00');
+            const exactEventSec = localStartSec + chunkStartTimeSec;
+            timeline.push({ tactic, commentary: item, exactEventSec, chunkStartSec: chunkStartTimeSec });
         }
 
         // Sort strictly by video timestamp
-        timeline.sort((a, b) => a.startSec - b.startSec);
+        timeline.sort((a, b) => a.exactEventSec - b.exactEventSec);
 
         console.log(`[The Director] Timeline (${timeline.length} events):`,
-            timeline.map(e => `${e.startSec}s → ${e.tactic.event}`).join(' | '));
+            timeline.map(e => `${e.exactEventSec}s → ${e.tactic.event}`).join(' | '));
 
         // ── Stream events to frontend ────────────────────────────────────────
         for (const entry of timeline) {
-            const { tactic, commentary, startSec } = entry;
+            const { tactic, commentary, exactEventSec, chunkStartSec } = entry;
 
-            // Support both old format (text) and new format (lines[])
-            const lines: string[] = Array.isArray(commentary.lines)
+            // Support both old format (text) and new format (lines array of objects)
+            const lines = Array.isArray(commentary.lines)
                 ? commentary.lines
-                : (commentary.text ? [commentary.text] : []);
+                : (commentary.text ? [{ text: commentary.text }] : []);
 
             const isHigh = commentary.importance === 'high' ||
                 /goal|save|block|shot|strike|penalty/i.test(tactic.event ?? '');
@@ -67,14 +71,17 @@ export async function runDirector(
                 if (lines[0]) {
                     ws.send(JSON.stringify({
                         type: 'commentary',
-                        data: lines[0],
-                        videoTimestamp: startSec
+                        data: lines[0].text,
+                        audioUrl: lines[0].audioUrl,
+                        // Fire general commentary immediately at chunk start to prevent dead air
+                        videoTimestamp: chunkStartSec 
                     }));
                 }
                 ws.send(JSON.stringify({
                     type: 'visual',
                     data: `Tracking: ${tactic.event}`,
-                    videoTimestamp: startSec
+                    mermaid: tactic.mermaid_diagram,
+                    videoTimestamp: exactEventSec
                 }));
                 await new Promise(r => setTimeout(r, 1500));
                 continue;
@@ -82,12 +89,24 @@ export async function runDirector(
 
             // ── High-importance: buildup → clip → climax → reaction ──────────
 
-            // Line 0: buildup — fires at the event's actual video timestamp
+            // Line 0: buildup — fire early at the start of the chunk to build anticipation
             if (lines[0]) {
                 ws.send(JSON.stringify({
                     type: 'commentary',
-                    data: lines[0],
-                    videoTimestamp: startSec
+                    data: lines[0].text,
+                    audioUrl: lines[0].audioUrl,
+                    videoTimestamp: chunkStartSec
+                }));
+            }
+
+            // Line 1: Climax — fire at the EXACT MOMENT of the event on the LIVE feed
+            // This prevents the 4-second gap of silence before the replay prompt
+            if (lines[1]) {
+                ws.send(JSON.stringify({
+                    type: 'commentary',
+                    data: lines[1].text,
+                    audioUrl: lines[1].audioUrl,
+                    videoTimestamp: exactEventSec
                 }));
             }
 
@@ -101,31 +120,25 @@ export async function runDirector(
                 }
             }
 
-            // VIDEO_CLIP fires at startSec — triggers the replay on frontend
+            // VIDEO_CLIP now fires 4s after exact event time — to ask the user "Want to see a replay?"
+            // It bundles the climax (Line 1) and reaction (Line 2) to be played DURING the replay.
+            let serveClipUrl = clipFilename ? `/clips/${clipFilename}` : undefined;
+            if (clipFilename) {
+                const clipPath = path.join(clipsDir, clipFilename);
+                const gcsClipUrl = await uploadToGCS(clipPath, 'clips');
+                serveClipUrl = getServeUrl(`/clips/${clipFilename}`, gcsClipUrl) ?? serveClipUrl;
+            }
+
             ws.send(JSON.stringify({
                 type: 'video_clip',
                 data: `Highlight: ${tactic.event}`,
-                clipUrl: clipFilename ? `/clips/${clipFilename}` : undefined,
-                videoTimestamp: startSec
+                clipUrl: serveClipUrl,
+                videoTimestamp: exactEventSec + 4,
+                replayCommentary: {
+                    climax: lines[1] ? { text: lines[1].text, audioUrl: lines[1].audioUrl, delay: 2 } : undefined,
+                    reaction: lines[2] ? { text: lines[2].text, audioUrl: lines[2].audioUrl, delay: 5 } : undefined
+                }
             }));
-
-            // Line 1 (climax) fires 2s into replay
-            if (lines[1]) {
-                ws.send(JSON.stringify({
-                    type: 'commentary',
-                    data: lines[1],
-                    videoTimestamp: startSec + 2
-                }));
-            }
-
-            // Line 2 (reaction) fires 5s into replay
-            if (lines[2]) {
-                ws.send(JSON.stringify({
-                    type: 'commentary',
-                    data: lines[2],
-                    videoTimestamp: startSec + 5
-                }));
-            }
 
             // Small gap before next event
             await new Promise(r => setTimeout(r, 1000));

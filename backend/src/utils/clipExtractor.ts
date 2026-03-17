@@ -19,8 +19,27 @@ const ffmpegBin = resolveFfmpegPath();
 if (ffmpegBin) {
     console.log(`[Clip] Using ffmpeg at: ${ffmpegBin}`);
     ffmpeg.setFfmpegPath(ffmpegBin);
+    // Use ffprobe from the same bin directory if available
+    const ffprobeBin = path.join(path.dirname(ffmpegBin), 'ffprobe.exe');
+    if (fs.existsSync(ffprobeBin)) {
+        ffmpeg.setFfprobePath(ffprobeBin);
+    }
 } else {
     console.log('[Clip] ffmpeg not found at winget location, relying on system PATH');
+}
+
+// Get the total duration of a video file in seconds
+export function getVideoDuration(videoPath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(videoPath, (err, metadata) => {
+            if (err) {
+                console.error('[Clip] ffprobe error:', err.message);
+                return reject(err);
+            }
+            const duration = metadata.format.duration;
+            resolve(duration ? parseFloat(duration.toString()) : 0);
+        });
+    });
 }
 
 // Parse "MM:SS-MM:SS" or "HH:MM:SS-HH:MM:SS" into start seconds + duration with ±1s buffer
@@ -34,9 +53,12 @@ export function parseTimestamp(ts: string): { start: number; duration: number } 
     };
     const rawStart = toSecs(parts[0]);
     const rawEnd = toSecs(parts[1] ?? parts[0]);
-    const start = Math.max(0, rawStart - 1);   // 1s buffer before
-    const end = rawEnd + 1;                   // 1s buffer after
-    return { start, duration: Math.max(end - start, 3) };
+    const prePadding = parseInt(process.env.CLIP_PRE_PADDING_SECONDS || '3', 10);
+    const postPadding = parseInt(process.env.CLIP_POST_PADDING_SECONDS || '3', 10);
+
+    const start = Math.max(0, rawStart - prePadding);
+    const end = rawEnd + postPadding;
+    return { start, duration: Math.max(end - start, prePadding + postPadding) };
 }
 
 // Fuzzy-match a clip title like "Highlight: Penalty Goal" against tactic event names
@@ -78,6 +100,40 @@ export function cutClip(
             })
             .on('error', (err) => {
                 console.error('[Clip] ❌ ffmpeg error:', err.message);
+                reject(err);
+            })
+            .run();
+    });
+}
+
+// Extract a specific time chunk from the video. Returns the saved filename.
+// Removes -c copy to force re-encoding, guaranteeing millisecond-accurate slicing 
+// (avoiding keyframe snapping) so we don't accidentally analyse the same clip twice.
+export function extractChunk(
+    videoPath: string,
+    chunksDir: string,
+    startTime: number,
+    duration: number,
+    chunkIndex: number
+): Promise<string> {
+    return new Promise((resolve, reject) => {
+        if (!fs.existsSync(chunksDir)) fs.mkdirSync(chunksDir, { recursive: true });
+
+        const filename = `chunk_${chunkIndex}_${startTime}s.mp4`;
+        const outputPath = path.join(chunksDir, filename);
+
+        console.log(`[Chunk] Extracting ${duration}s from ${startTime}s → ${filename}`);
+
+        ffmpeg(videoPath)
+            .setStartTime(startTime)
+            .setDuration(duration)
+            .outputOptions(['-preset ultrafast', '-threads 2'])
+            .output(outputPath)
+            .on('end', () => {
+                resolve(filename);
+            })
+            .on('error', (err) => {
+                console.error(`[Chunk ${chunkIndex}] ❌ ffmpeg error:`, err.message);
                 reject(err);
             })
             .run();

@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+credentials.json
+uploads
+backend/.env
+backend/credentials.json
+backend/uploads
+frontend/.next
+frontend/node_modules
