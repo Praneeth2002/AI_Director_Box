@@ -1,5 +1,7 @@
 # The AI Director's Box 🎬⚽
 
+Link: https://ai-director-frontend-184241358028.us-central1.run.app/
+
 **The AI Director's Box** is an experimental, fully autonomous AI-powered broadcast production suite built for the **Gemini API "Creative Storyteller" Competition**. Instead of just generating passive text, this system acts as a real-time commentator, analyst, and creative director for live sports.
 
 It deeply leverages the native multimodal and interleaved capabilities of Google's Gemini models to watch a video feed and weave together a rich, mixed-media "Match Story" containing:
